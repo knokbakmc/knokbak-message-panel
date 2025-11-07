@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Chat Panel</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { font-family: 'Inter', sans-serif; }
+        /* Style the scrollbar for better aesthetics */
+        #messages-container::-webkit-scrollbar { width: 8px; }
+        #messages-container::-webkit-scrollbar-thumb {
+            background-color: #9ca3af;
+            border-radius: 4px;
+        }
+        #messages-container::-webkit-scrollbar-track {
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+
+    <!-- Main Chat Container -->
+    <div class="bg-white shadow-2xl rounded-xl w-full max-w-4xl flex flex-col h-[90vh] transition-all duration-300">
+        <!-- Header -->
+        <header class="p-4 border-b bg-indigo-600 text-white rounded-t-xl flex justify-between items-center">
+            <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
+            <button id="config-toggle" class="bg-indigo-700 hover:bg-indigo-800 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Config
+            </button>
+        </header>
+
+        <!-- Configuration Modal/Panel -->
+        <div id="config-panel" class="p-4 bg-yellow-50 border-b hidden">
+            <h2 class="text-lg font-semibold mb-2 text-yellow-800">Discord Webhook Configuration</h2>
+            <p class="text-sm text-yellow-800 mb-3">Enter your Discord Webhook URL below to send chat messages to your group chat.</p>
+            <div class="flex flex-col sm:flex-row gap-3">
+                <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL (starts with https://discord.com/api/webhooks...)" class="flex-grow p-2 border border-yellow-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-sm">
+                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Save Webhook</button>
+            </div>
+            <p id="webhook-status" class="mt-2 text-sm font-medium"></p>
+        </div>
+
+        <!-- Chat Messages Area -->
+        <main id="messages-container" class="flex-grow p-4 overflow-y-auto space-y-4 bg-gray-50"></main>
+
+        <!-- Input and Sender Details -->
+        <footer class="p-4 border-t bg-white rounded-b-xl">
+            <div class="mb-3">
+                <label for="sender-name" class="block text-sm font-medium text-gray-700">Your Display Name:</label>
+                <input type="text" id="sender-name" value="Student" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+            </div>
+            <div class="flex space-x-3">
+                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 border border-gray-300 rounded-xl resize-none focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm"></textarea>
+                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-700 transition duration-150 shadow-md flex items-center justify-center w-24">
+                    Send
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Firebase SDKs and Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // UI Elements
+        const messagesContainer = document.getElementById('messages-container');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const senderNameInput = document.getElementById('sender-name');
+        const configPanel = document.getElementById('config-panel');
+        const configToggle = document.getElementById('config-toggle');
+        const webhookUrlInput = document.getElementById('webhook-url-input');
+        const saveWebhookButton = document.getElementById('save-webhook-button');
+        const webhookStatus = document.getElementById('webhook-status');
+
+        let db, auth, userId = 'loading';
+        let webhookUrl = null;
+
+        // --- Utility Functions ---
+
+        /** Formats a timestamp object for display */
+        function formatTimestamp(timestamp) {
+            if (timestamp && timestamp.toDate) {
+                return timestamp.toDate().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            }
+            return 'Sending...';
+        }
+
+        /** Shows a temporary status message in the webhook configuration */
+        function showWebhookStatus(message, isError = false) {
+            webhookStatus.textContent = message;
+            webhookStatus.className = `mt-2 text-sm font-medium ${isError ? 'text-red-600' : 'text-green-600'}`;
+            setTimeout(() => { webhookStatus.textContent = ''; }, 4000);
+        }
+
+        /** Simple custom alert/message box */
+        function showMessage(text, isError = false) {
+            const tempDiv = document.createElement('div');
+            tempDiv.textContent = text;
+            tempDiv.className = `fixed top-4 right-4 p-3 rounded-lg shadow-xl text-white font-semibold z-50 transition-opacity duration-300 ${isError ? 'bg-red-600' : 'bg-green-600'}`;
+            document.body.appendChild(tempDiv);
+            setTimeout(() => {
+                tempDiv.style.opacity = '0';
+                tempDiv.addEventListener('transitionend', () => tempDiv.remove());
+            }, 5000);
+        }
+        
+        // --- Firebase Initialization and Auth ---
+
+        window.onload = function() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Sign in logic
+                if (initialAuthToken) {
+                    signInWithCustomToken(auth, initialAuthToken).catch(e => {
+                        console.error("Custom token sign-in failed. Falling back to anonymous.", e);
+                        signInAnonymously(auth);
+                    });
+                } else {
+                    signInAnonymously(auth);
+                }
+
+                // Authentication state change listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Firebase initialized. User ID:", userId);
+                        loadWebhookUrl(userId);
+                        listenForMessages();
+                    } else {
+                        console.log("User is signed out or waiting for sign-in.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                messagesContainer.innerHTML = `<p class="text-red-500 p-4">Error initializing chat services. Check console for details.</p>`;
+            }
+        }
+
+        // --- Discord Webhook Logic ---
+        
+        // Loads the user's saved webhook URL from Firestore (Private data path)
+        async function loadWebhookUrl(currentUserId) {
+            const configPath = `/artifacts/${appId}/users/${currentUserId}/config/webhook`;
+            const webhookDocRef = doc(db, configPath);
+            try {
+                const docSnap = await getDoc(webhookDocRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    webhookUrl = data.url;
+                    webhookUrlInput.value = webhookUrl;
+                    showWebhookStatus("Webhook URL loaded.", false);
+                } else {
+                    showWebhookStatus("No webhook URL saved. Please configure it.", true);
+                }
+            } catch (e) {
+                console.error("Error loading webhook URL:", e);
+                showWebhookStatus("Failed to load webhook URL.", true);
+            }
+        }
+
+        // Saves the webhook URL to Firestore
+        saveWebhookButton.addEventListener('click', async () => {
+            const url = webhookUrlInput.value.trim();
+            if (!url.startsWith('http')) {
+                showWebhookStatus("Please enter a valid URL.", true);
+                return;
+            }
+            
+            const configPath = `/artifacts/${appId}/users/${userId}/config/webhook`;
+            const webhookDocRef = doc(db, configPath);
+
+            try {
+                await setDoc(webhookDocRef, { url: url });
+                webhookUrl = url;
+                showWebhookStatus("Webhook URL saved successfully!", false);
+                showMessage("Webhook saved!");
+            } catch (e) {
+                console.error("Error saving webhook URL:", e);
+                showWebhookStatus("Failed to save webhook URL.", true);
+            }
+        });
+
+        // Posts the message to the saved Discord webhook
+        async function postToDiscord(message, senderName) {
+            if (!webhookUrl) {
+                showMessage("Webhook not configured. Message sent only to app chat.", true);
+                return;
+            }
+
+            const payload = {
+                content: message,
+                username: senderName,
+            };
+            
+            // Check for valid Discord Webhook format
+            if (!webhookUrl.includes("discord.com/api/webhooks")) {
+                 console.error("Webhook URL does not appear to be a valid Discord link.");
+                 return;
+            }
+
+            try {
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    console.log("Message successfully posted to Discord webhook.");
+                } else {
+                    console.error("Failed to post message to Discord webhook:", response.status, response.statusText);
+                }
+            } catch (e) {
+                console.error("Error posting to Discord webhook:", e);
+            }
+        }
+        
+        // Toggle Configuration Panel
+        configToggle.addEventListener('click', () => {
+            configPanel.classList.toggle('hidden');
+        });
+
+        // --- Chat Messaging Logic ---
+
+        // Sends the message to Firestore and Discord
+        async function sendMessage() {
+            const messageText = messageInput.value.trim();
+            const senderName = senderNameInput.value.trim() || 'Anonymous';
+
+            if (messageText === "") return;
+            
+            const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
+            const messagesRef = collection(db, messagesCollectionPath);
+
+            try {
+                // 1. Save to Firestore (Public data path)
+                await setDoc(doc(messagesRef), {
+                    text: messageText,
+                    timestamp: serverTimestamp(),
+                    senderName: senderName,
+                    senderId: userId
+                });
+                
+                // 2. Post to Discord (webhook) - Non-blocking
+                postToDiscord(messageText, senderName);
+
+                messageInput.value = ''; // Clear input
+                messageInput.focus();
+            } catch (e) {
+                console.error("Error sending message:", e);
+                showMessage('Failed to send message: ' + e.message, true);
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // Prevents newline
+                sendMessage();
+            }
+        });
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', () => {
+            messageInput.style.height = 'auto';
+            messageInput.style.height = messageInput.scrollHeight + 'px';
+        });
+
+        // Creates a message bubble HTML element
+        function createMessageElement(data) {
+            const isSelf = data.senderId === userId;
+            const time = formatTimestamp(data.timestamp);
+            
+            const alignment = isSelf ? 'self-end' : 'self-start';
+            const bgColor = isSelf ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-800';
+            const displayName = isSelf ? 'You' : data.senderName;
+
+            const div = document.createElement('div');
+            div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-sm ${bgColor} ${alignment}`;
+            div.innerHTML = `
+                <div class="text-sm font-bold mb-1 ${isSelf ? 'text-indigo-100' : 'text-gray-600'}">${displayName}</div>
+                <div class="text-base whitespace-pre-wrap break-words">${data.text}</div>
+                <div class="text-xs mt-1 text-opacity-80 text-right">${time}</div>
+            `;
+            return div;
+        }
+
+        // Listens for real-time messages from Firestore
+        function listenForMessages() {
+            const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
+            const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
+
+            // Set up real-time listener
+            onSnapshot(messagesQuery, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const data = { id: change.doc.id, ...change.doc.data() };
+
+                    if (change.type === "added") {
+                        const newElement = createMessageElement(data);
+                        messagesContainer.appendChild(newElement);
+                        
+                        // Scroll to bottom when a new message is added
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                });
+            }, (error) => {
+                console.error("Error listening to messages:", error);
+                messagesContainer.innerHTML = `<p class="text-red-500 p-4">Failed to load chat history.</p>`;
+            });
+        }
+        
+    </script>
+</body>
+</html>
