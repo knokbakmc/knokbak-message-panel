@@ -200,7 +200,7 @@ const MAX_FILE_SIZE_MB = 500;
 const UPLOAD_ENDPOINT = "https://school-upload-worker-endpoint.garrett23-main-garrettlol.workers.dev";
 // The secret token used for Worker authentication.
 const UPLOAD_AUTH_TOKEN = "Sch00lUpl0ad2025";
-// Base URL for the public file link
+// Base URL for the public file link (Used here only for context, actual URL comes from Worker response)
 const CDN_BASE_URL = "https://cdna.knokbak.com/software/share/";
 // =================================
 
@@ -247,6 +247,7 @@ const uploadProgressBar = document.getElementById('upload-progress-bar');
 const progressBarFill = document.getElementById('progress-bar-fill');
 const newMsgIndicator = document.getElementById('new-message-indicator');
 const webhookStatusElement = document.getElementById('webhook-status');
+const modalMessageCount = document.getElementById('modal-message-count');
 
 
 // 4. UTILITY FUNCTIONS
@@ -281,10 +282,18 @@ function showWebhookStatus(message, isError = false) {
     webhookStatusElement.className = `mt-2 text-sm font-medium ${isError ? 'text-red-400' : 'text-green-400'}`;
 }
 
+/**
+ * Updates the status message in the file input area.
+ */
+function updateFileStatus(message, isError = false) {
+    fileNameDisplay.textContent = message;
+    fileNameDisplay.className = isError ? 'text-red-400' : 'text-green-400';
+}
 
 // 5. APPLICATION LOGIC
 // Update the notification badge on the changelog button
 function updateNotificationBadge() {
+    modalMessageCount.textContent = newMessageCount;
     if (newMessageCount > 0) {
         newMsgIndicator.textContent = newMessageCount;
         newMsgIndicator.classList.remove('hidden');
@@ -432,11 +441,13 @@ function clearAttachedFile() {
     fileInput.value = '';
     fileStatusAndProgress.classList.add('hidden');
     progressBarFill.style.width = '0%';
+    // Reset status display
+    fileNameDisplay.className = 'text-sm text-gray-300 font-medium truncate mb-1';
+    fileNameDisplay.textContent = '';
 }
 
 /**
  * Uploads the attached file to the Cloudflare Worker endpoint.
- * This replaces the simulated upload logic with a real fetch request.
  */
 async function uploadFile(file) {
     const formData = new FormData();
@@ -446,7 +457,7 @@ async function uploadFile(file) {
     fileStatusAndProgress.classList.remove('hidden');
     uploadProgressBar.classList.remove('hidden');
     progressBarFill.style.width = '50%'; // Indicate indeterminate progress
-    sendButton.disabled = true;
+    updateFileStatus(`Uploading ${file.name}...`);
     
     try {
         const response = await fetch(UPLOAD_ENDPOINT, {
@@ -459,22 +470,34 @@ async function uploadFile(file) {
 
         if (!response.ok) {
             const errorData = await response.text();
-            throw new Error(`Upload failed: ${response.status} - ${errorData}`);
+            throw new Error(`Upload failed (${response.status} - ${response.statusText}): ${errorData}`);
         }
 
         const result = await response.json();
         
         // Finalize progress bar and button state
         progressBarFill.style.width = '100%';
-        sendButton.disabled = false;
+        updateFileStatus(`Upload Complete: ${file.name}`, false);
         
+        // Wait a moment before allowing the UI to clear the progress bar
+        setTimeout(() => {
+            uploadProgressBar.classList.add('hidden');
+        }, 1500);
+
         return result.url; 
 
     } catch (error) {
-        // Reset button state on failure
-        sendButton.disabled = false;
+        // Reset state on failure
+        uploadProgressBar.classList.add('hidden'); // Hide bar
         progressBarFill.style.width = '0%';
-        throw error;
+        updateFileStatus(`Error: ${error.message}`, true);
+        
+        // Clear file data on upload failure so user can retry or send text only
+        attachedFile = null; 
+        uploadedFileUrl = null;
+        fileInput.value = '';
+        
+        throw error; // Re-throw to be caught in sendMessage
     }
 }
 
@@ -482,6 +505,7 @@ async function uploadFile(file) {
 
 // Sends the message to Firestore and Discord
 async function sendMessage() {
+    console.log("--- sendMessage called ---");
     if (!db) {
         showMessage("Chat service not connected. Please refresh.", true);
         return;
@@ -489,25 +513,46 @@ async function sendMessage() {
 
     const messageText = messageInput.value.trim();
     const senderName = senderNameInput.value.trim() || 'Anonymous';
+    
+    console.log(`Text: "${messageText}", File Attached: ${!!attachedFile}`);
 
     // Prevent sending empty message AND no attached file
-    if (messageText === "" && !attachedFile) return;
+    if (messageText === "" && !attachedFile) {
+        showMessage("Please enter a message or select a file.", true);
+        console.log("sendMessage exiting: Empty content.");
+        return;
+    }
+    
+    // Temporarily disable send button immediately
+    sendButton.disabled = true;
 
     // If a file is attached, upload it first
     if (attachedFile && !uploadedFileUrl) {
         try {
+            // This is where the upload happens, and it updates the UI via uploadFile
             uploadedFileUrl = await uploadFile(attachedFile);
         } catch (e) {
-            console.error("File upload failed:", e);
-            showMessage('File upload failed: ' + e.message, true);
-            clearAttachedFile();
-            return;
+            console.error("File upload failed in sendMessage:", e);
+            // uploadFile already handles UI cleanup on error, just re-enable the button
+            sendButton.disabled = false;
+            return; // Exit as upload failed
         }
     }
+    
+    // Safety check: if they only attached a file, but the upload failed, we exit.
+    if (messageText === "" && !uploadedFileUrl) {
+         showMessage("Upload failed or URL is missing. Please try again.", true);
+         sendButton.disabled = false;
+         return;
+    }
+
 
     // Public data path uses the dynamically determined currentAppId
     const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
     const messagesRef = collection(db, messagesCollectionPath);
+    
+    // START DB/Webhook sending
+    updateFileStatus(attachedFile ? `Sending message and link...` : `Sending message...`);
 
     try {
         // 1. Save to Firestore
@@ -518,7 +563,7 @@ async function sendMessage() {
             senderId: userId,
             attachmentUrl: uploadedFileUrl
         });
-
+        
         // 2. Post to Discord (webhook) - Non-blocking
         postToDiscord(messageText, senderName, uploadedFileUrl);
 
@@ -526,11 +571,18 @@ async function sendMessage() {
         messageInput.value = '';
         messageInput.style.height = 'auto';
         messageInput.focus();
-        clearAttachedFile();
+        clearAttachedFile(); // Clears file variables and UI elements
+        showMessage(`Message sent successfully.`, false);
+        
+        // Final button re-enable
+        sendButton.disabled = false;
+
 
     } catch (e) {
-        console.error("Error sending message:", e);
+        console.error("Error sending message to Firestore:", e);
         showMessage('Failed to send message: ' + e.message, true);
+        updateFileStatus(`Failed to save message: ${e.message}`, true);
+        sendButton.disabled = false;
     }
 }
 
@@ -555,7 +607,7 @@ function createAttachmentHTML(url) {
     const fileExtension = url.split('.').pop().toLowerCase();
     let mediaHTML = '';
 
-    // Check for common media types for embedding - *** NOW INCLUDES 'gif' ***
+    // Check for common media types for embedding - INCLUDES 'gif'
     if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension)) {
         // Image embed
         mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
@@ -619,7 +671,7 @@ function listenForMessages() {
                     sendBrowserNotification(data.senderName, data.text);
 
                     // 2. Handle Changelog badge update
-                    if (isChangelogOpen) {
+                    if (!isChangelogOpen) {
                         newMessageCount++;
                         updateNotificationBadge();
                     }
