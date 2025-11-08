@@ -1,4 +1,85 @@
-<!-- Firebase SDKs and Logic -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Chat Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* System Font Stack: Defaults to San Francisco on macOS, Segoe UI on Windows, etc. */
+        :root { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif; 
+        }
+
+        /* Style the scrollbar for better aesthetics */
+        #messages-container::-webkit-scrollbar { width: 8px; }
+        #messages-container::-webkit-scrollbar-thumb {
+            background-color: #4b5563; /* Darker gray thumb */
+            border-radius: 4px;
+        }
+        #messages-container::-webkit-scrollbar-track {
+            background-color: #374151; /* Dark gray track */
+        }
+        
+        /* Utility class for fade-in effect */
+        .fade-in {
+            opacity: 1;
+            transition: opacity 1s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 min-h-screen flex items-center justify-center p-4">
+
+    <div id="code-screen" class="w-full max-w-lg bg-gray-900 shadow-2xl rounded-xl p-8 flex flex-col items-center justify-center transition-opacity duration-500 ease-in-out">
+        <h1 class="text-3xl font-bold text-white mb-6">Enter Access Code</h1>
+        <p class="text-gray-400 mb-6 text-center">Please enter the security code to access the school chat panel.</p>
+        
+        <div id="code-box-content" class="w-full">
+            <input type="text" id="access-code-input" placeholder="Ten-digit code (e.g., 5815287646)" maxlength="10" class="w-full p-4 text-center text-2xl tracking-widest border-2 border-indigo-600 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-300 bg-gray-700 text-white mb-4">
+            <button id="enter-code-button" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-semibold hover:bg-indigo-500 transition duration-300 shadow-lg">
+                Access Chat
+            </button>
+            <p id="code-error" class="text-red-400 mt-4 text-center opacity-0 transition-opacity duration-300">Invalid code. Please try again.</p>
+        </div>
+    </div>
+    <div id="chat-panel" class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex-col h-[90vh] transition-all duration-300 hidden opacity-0">
+        <header class="p-4 border-b border-gray-700 bg-indigo-700 text-white rounded-t-xl flex justify-between items-center">
+            <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
+            <button id="config-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Config
+            </button>
+        </header>
+
+        <div id="config-panel" class="p-4 border-b border-gray-700 bg-yellow-900 hidden">
+            <h2 class="text-lg font-semibold mb-2 text-yellow-300">Discord Webhook Configuration</h2>
+            <p class="text-sm text-yellow-400 mb-3">This URL determines where external messages (e.g., administrator alerts) are sent. Note: This URL is only saved for your current session.</p>
+            <div class="flex space-x-2">
+                <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL" class="flex-grow p-2 rounded-lg bg-gray-700 text-white border border-gray-600 focus:ring-yellow-500 focus:border-yellow-500" value="https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-">
+                <button id="save-webhook-button" class="bg-yellow-600 text-white p-2 rounded-lg font-semibold hover:bg-yellow-500 transition duration-200">Save URL</button>
+            </div>
+            <p id="webhook-status" class="mt-2 text-sm font-medium"></p>
+        </div>
+
+        <div id="messages-container" class="flex-grow overflow-y-auto p-4 space-y-4 flex flex-col">
+            <p id="loading-status" class="text-center text-gray-500 p-4 font-semibold">Authenticating and loading chat history...</p>
+        </div>
+
+        <div class="p-4 border-t border-gray-700 flex flex-col space-y-3">
+            <input type="text" id="sender-name" placeholder="Your Display Name (e.g., JaneDoe123)" value="Student-User" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500">
+            <div class="flex space-x-2 items-end">
+                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 resize-none overflow-hidden border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500 min-h-[44px]" style="max-height: 200px;"></textarea>
+                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-500 transition duration-200 flex items-center justify-center h-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         // NOTE: signInWithCustomToken is added here for robust authentication
@@ -10,26 +91,25 @@
         // 1. CONFIGURATION (EDIT ME)
         // =================================
         
-        // --- Access Codes (10 digits) ---
         const ACCESS_CODES = [
-            "5815287646",  // General Student Access
-            "1122334455",  // Teacher Access Example
-            "9876543210"   // Admin Access Example
+            "2879556054",  // David
+            "0009029674",  // Camden
+            "5815287646",   // Garrett
+            "0269927548", // Isaac
+            "7950368985", // Amir
         ];
-        
-        // --- Hardcoded Discord Webhook URL ---
-        const DEFAULT_WEBHOOK_URL = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-";
         
         // --- Placeholder Firebase Config (Fallback for External Hosting) ---
         const PLACEHOLDER_FIREBASE_CONFIG = {
-             apiKey: "AIzaSy_FAKE_KEY", 
-             authDomain: "default-app-id.firebaseapp.com",
-             projectId: "default-app-id", 
-             storageBucket: "default-app-id.appspot.com",
-             messagingSenderId: "123456789012", 
-             appId: "1:123456789012:web:abcdef0123456789"
+             apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
+             authDomain: "knokbak-message-panel.firebaseapp.com",
+             projectId: "knokbak-message-panel", 
+             storageBucket: "knokbak-message-panel.firebasestorage.app",
+             messagingSenderId: "424259711684", 
+             appId: "1:424259711684:web:6818525d64024815604f91"
+             
         };
-        const PLACEHOLDER_APP_ID = 'public-chat-app'; 
+        const PLACEHOLDER_APP_ID = 'public-chat-app';
         // =================================
         
         
@@ -54,11 +134,8 @@
         const chatPanel = document.getElementById('chat-panel');
 
         let db, auth, userId = 'loading';
-        let currentAppId = PLACEHOLDER_APP_ID; // Will be overwritten if running in Canvas
-        let webhookUrl = DEFAULT_WEBHOOK_URL; 
-
-        // Set the default webhook into the input field
-        webhookUrlInput.value = DEFAULT_WEBHOOK_URL;
+        let currentAppId = PLACEHOLDER_APP_ID; 
+        let webhookUrl = webhookUrlInput.value; // Get initial value from HTML input
 
         // --- Utility Functions ---
 
@@ -89,25 +166,22 @@
             }, 5000);
         }
         
-        // --- Code Entry Logic ---
+        // --- Code Entry and Animation Logic (FIXED) ---
         
-        // Handles the visual animation and transition to the chat panel
         function startChatTransition() {
             // 1. Setup the animation properties on the code box content
-            // The 1.5s duration matches the desired effect
             codeBoxContent.style.transition = 'all 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
             codeBoxContent.style.position = 'fixed';
             codeBoxContent.style.zIndex = '100';
 
-            // Center the element relative to the body before starting the move (Crucial for smooth transition)
+            // Center the element relative to the body before starting the move
             const rect = codeBoxContent.getBoundingClientRect();
             codeBoxContent.style.left = `${rect.left}px`;
             codeBoxContent.style.top = `${rect.top}px`;
             codeBoxContent.style.width = `${rect.width}px`;
 
-            // 2. Start the move/scale animation after a small tick
+            // 2. Start the move/scale animation (the "raindrop" effect)
             setTimeout(() => {
-                // Target: Move 80vh up (off-screen) and scale down to 0.3
                 codeBoxContent.style.transform = 'translateY(-80vh) scale(0.3)';
                 codeScreen.classList.add('opacity-0'); // Fade out the background container
             }, 50); 
@@ -179,10 +253,10 @@
 
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
-                    console.log("Firebase signed in with Custom Token.");
+                    console.log("Firebase signed in with Custom Token (Canvas).");
                 } else {
                     await signInAnonymously(auth);
-                    console.log("Firebase signed in Anonymously.");
+                    console.log("Firebase signed in Anonymously (External).");
                 }
 
                 // 3. Set up Auth State Change Listener to start chat features
@@ -214,6 +288,7 @@
             }
             
             webhookUrl = url;
+            webhookUrlInput.value = url;
             showWebhookStatus("Webhook URL updated in session only.", false);
             showMessage("Webhook updated for this session!");
         });
@@ -232,15 +307,11 @@
             };
             
             try {
-                const response = await fetch(webhookUrl, {
+                await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-
-                if (!response.ok) {
-                    console.error("Discord Webhook Error:", response.status, response.statusText);
-                }
             } catch (e) {
                 console.error("Network Error posting to Discord:", e);
             }
@@ -270,7 +341,7 @@
             const messagesRef = collection(db, messagesCollectionPath);
 
             try {
-                // 1. Save to Firestore (Public data path)
+                // 1. Save to Firestore
                 await setDoc(doc(messagesRef), {
                     text: messageText,
                     timestamp: serverTimestamp(),
