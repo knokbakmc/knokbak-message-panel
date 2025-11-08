@@ -1,124 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>School Chat Panel</title>
-    <!-- Load Tailwind CSS for styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* System Font Stack: Defaults to San Francisco on macOS, Segoe UI on Windows, etc. */
-        :root { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif; 
-        }
-
-        /* Style the scrollbar for better aesthetics */
-        #messages-container::-webkit-scrollbar { width: 8px; }
-        #messages-container::-webkit-scrollbar-thumb {
-            background-color: #4b5563; /* Darker gray thumb */
-            border-radius: 4px;
-        }
-        #messages-container::-webkit-scrollbar-track {
-            background-color: #374151; /* Dark gray track */
-        }
-
-        /* ---------------------------------- */
-        /* Animation Classes for Code Entrance */
-        /* ---------------------------------- */
-        .fade-in {
-            opacity: 1;
-            transition: opacity 1s ease-out;
-        }
-        
-        .fade-out {
-            opacity: 0;
-            transition: opacity 0.5s ease-out;
-        }
-
-        .code-box-drop {
-            /* Initial state */
-            transform: translateY(0) scale(1);
-            opacity: 1;
-            /* Target state (moved to the top) */
-            transition: all 1.5s cubic-bezier(0.4, 0, 0.2, 1); /* Custom smooth ease */
-        }
-        
-        .code-box-drop-end {
-            /* End state: positioned at top, scaled down */
-            transform: translateY(-80vh) scale(0.3);
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            z-index: 100;
-        }
-
-    </style>
-</head>
-<body class="bg-gray-800 min-h-screen flex items-center justify-center p-4">
-    <!-- 1. Code Entry Screen (Initial View) -->
-    <div id="code-screen" class="w-full max-w-lg bg-gray-900 shadow-2xl rounded-xl p-8 flex flex-col items-center justify-center transition-opacity duration-500 ease-in-out">
-        <h1 class="text-3xl font-bold text-white mb-6">Enter Access Code</h1>
-        <p class="text-gray-400 mb-6 text-center">Please enter the security code to access the school chat panel.</p>
-        
-        <div id="code-box-content" class="w-full">
-            <input type="text" id="access-code-input" placeholder="Ten-digit code (e.g., 5815287646)" maxlength="10" class="w-full p-4 text-center text-2xl tracking-widest border-2 border-indigo-600 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-300 bg-gray-700 text-white mb-4">
-            <button id="enter-code-button" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-semibold hover:bg-indigo-500 transition duration-300 shadow-lg">
-                Access Chat
-            </button>
-            <p id="code-error" class="text-red-400 mt-4 text-center opacity-0 transition-opacity duration-300">Invalid code. Please try again.</p>
-        </div>
-    </div>
-
-
-    <!-- 2. Main Chat Container (Hidden by Default) -->
-    <div id="chat-panel" class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex-col h-[90vh] transition-all duration-300 hidden opacity-0">
-        <!-- Header -->
-        <header class="p-4 border-b border-gray-700 bg-indigo-700 text-white rounded-t-xl flex justify-between items-center">
-            <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
-            <button id="config-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Config
-            </button>
-        </header>
-
-        <!-- Configuration Modal/Panel (Pre-filled and dark themed) -->
-        <div id="config-panel" class="p-4 border-b border-gray-700 bg-yellow-900 hidden">
-            <h2 class="text-lg font-semibold mb-2 text-yellow-300">Discord Webhook Configuration</h2>
-            <p class="text-sm text-yellow-300 mb-3">The default webhook is loaded automatically.</p>
-            <div class="flex flex-col sm:flex-row gap-3">
-                <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL (starts with https://discord.com/api/webhooks...)" class="flex-grow p-2 border border-yellow-700 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-sm bg-yellow-900 text-white">
-                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Update Webhook (Session Only)</button>
-            </div>
-            <p id="webhook-status" class="mt-2 text-sm font-medium"></p>
-        </div>
-
-        <!-- Chat Messages Area -->
-        <main id="messages-container" class="flex-grow p-4 overflow-y-auto space-y-4 bg-gray-900">
-             <p id="loading-status" class="text-center text-gray-400 p-4">Attempting to initialize services...</p>
-        </main>
-
-        <!-- Input and Sender Details -->
-        <footer class="p-4 border-t border-gray-700 bg-gray-900 rounded-b-xl">
-            <div class="mb-3">
-                <label for="sender-name" class="block text-sm font-medium text-gray-300">Your Display Name:</label>
-                <input type="text" id="sender-name" value="Student" class="w-full p-2 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 bg-gray-700 text-white">
-            </div>
-            <div class="flex space-x-3">
-                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 border border-gray-600 rounded-xl resize-none focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm bg-gray-700 text-white"></textarea>
-                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-500 transition duration-150 shadow-md flex items-center justify-center w-24">
-                    Send
-                </button>
-            </div>
-        </footer>
-    </div>
-    <!-- Firebase SDKs and Logic -->
+<!-- Firebase SDKs and Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         // NOTE: signInWithCustomToken is added here for robust authentication
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // setLogLevel is added to the getFirestore import line for debugging
+        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // =================================
         // 1. CONFIGURATION (EDIT ME)
@@ -126,11 +12,9 @@
         
         // --- Access Codes (10 digits) ---
         const ACCESS_CODES = [
-            "2879556054",  // David
-            "0009029674",  // Camden
-            "5815287646",   // Garrett
-            "0269927548", // Isaac
-            "7950368985", // Amir
+            "5815287646",  // General Student Access
+            "1122334455",  // Teacher Access Example
+            "9876543210"   // Admin Access Example
         ];
         
         // --- Hardcoded Discord Webhook URL ---
@@ -209,16 +93,26 @@
         
         // Handles the visual animation and transition to the chat panel
         function startChatTransition() {
-            // 1. Start the code box animation
-            codeBoxContent.classList.add('code-box-drop-end');
-            codeScreen.style.alignItems = 'flex-start'; 
+            // 1. Setup the animation properties on the code box content
+            // The 1.5s duration matches the desired effect
+            codeBoxContent.style.transition = 'all 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
+            codeBoxContent.style.position = 'fixed';
+            codeBoxContent.style.zIndex = '100';
 
-            // 2. Hide the main code screen background
+            // Center the element relative to the body before starting the move (Crucial for smooth transition)
+            const rect = codeBoxContent.getBoundingClientRect();
+            codeBoxContent.style.left = `${rect.left}px`;
+            codeBoxContent.style.top = `${rect.top}px`;
+            codeBoxContent.style.width = `${rect.width}px`;
+
+            // 2. Start the move/scale animation after a small tick
             setTimeout(() => {
-                codeScreen.classList.add('fade-out');
-            }, 500);
-
-            // 3. Start the Firebase initialization and fade in the chat panel
+                // Target: Move 80vh up (off-screen) and scale down to 0.3
+                codeBoxContent.style.transform = 'translateY(-80vh) scale(0.3)';
+                codeScreen.classList.add('opacity-0'); // Fade out the background container
+            }, 50); 
+            
+            // 3. Complete the transition and show the chat panel
             setTimeout(() => {
                 codeScreen.classList.add('hidden');
                 
@@ -231,7 +125,7 @@
 
                 // Initialize Firebase services
                 initFirebase();
-            }, 1000);
+            }, 1500); // Wait for the full 1.5s transition
         }
 
         // Handles the code verification
@@ -254,10 +148,14 @@
             }
         });
 
-        // --- Firebase Initialization and Auth (Adaptive Fix) ---
+        // --- Firebase Initialization and Auth (Adaptive Fix with Debugging) ---
 
         async function initFirebase() {
             try {
+                // ** CRITICAL: Set log level to debug for detailed console output **
+                setLogLevel('debug'); 
+                console.log("Firebase debug logging enabled. Check console for detailed connection messages.");
+
                 // Determine configuration based on environment variables availability
                 const isCanvasRuntime = typeof __firebase_config !== 'undefined';
                 let configToUse = PLACEHOLDER_FIREBASE_CONFIG;
@@ -266,7 +164,7 @@
                     // Use actual Canvas variables if available
                     configToUse = JSON.parse(__firebase_config);
                     currentAppId = typeof __app_id !== 'undefined' ? __app_id : PLACEHOLDER_APP_ID;
-                    console.log("Using Canvas runtime Firebase config.");
+                    console.log("Using Canvas runtime Firebase config. App ID:", currentAppId);
                 } else {
                     console.log("Using Placeholder Firebase config.");
                 }
@@ -291,7 +189,7 @@
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
-                        console.log("Firebase initialized. User ID:", userId, "App ID:", currentAppId);
+                        console.log("Auth success. User ID:", userId);
                         showWebhookStatus("Using default hardcoded webhook URL.", false); 
                         listenForMessages(); // Start listening once authenticated
                     } else {
