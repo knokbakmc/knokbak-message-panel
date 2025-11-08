@@ -164,7 +164,7 @@
         </div>
     </div>
 
-    <script type="module">
+ <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -249,9 +249,7 @@ const newMsgIndicator = document.getElementById('new-message-indicator');
 const webhookStatusElement = document.getElementById('webhook-status');
 
 
-// 4. UTILITY FUNCTIONS (Unchanged)
-// ... (Your original code for utility functions: formatTimestamp, debounce, showMessage, showWebhookStatus)
-
+// 4. UTILITY FUNCTIONS
 function formatTimestamp(timestamp) {
     if (!timestamp) return '';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -284,9 +282,7 @@ function showWebhookStatus(message, isError = false) {
 }
 
 
-// 5. APPLICATION LOGIC (Unchanged)
-// ... (Your original code for: updateNotificationBadge, sendBrowserNotification, initializeFirebase, validateCode)
-
+// 5. APPLICATION LOGIC
 // Update the notification badge on the changelog button
 function updateNotificationBadge() {
     if (newMessageCount > 0) {
@@ -446,12 +442,11 @@ async function uploadFile(file) {
     const formData = new FormData();
     formData.append('file', file);
     
-    // START: Loading/Progress State (Preserved from old simulated function)
+    // START: Loading/Progress State
     fileStatusAndProgress.classList.remove('hidden');
     uploadProgressBar.classList.remove('hidden');
     progressBarFill.style.width = '50%'; // Indicate indeterminate progress
     sendButton.disabled = true;
-    // END: Loading/Progress State
     
     try {
         const response = await fetch(UPLOAD_ENDPOINT, {
@@ -473,8 +468,6 @@ async function uploadFile(file) {
         progressBarFill.style.width = '100%';
         sendButton.disabled = false;
         
-        // The Worker returns { success: true, url: '...', fileName: '...' }
-        // We return the URL string for the caller (sendMessage) to use.
         return result.url; 
 
     } catch (error) {
@@ -562,7 +555,7 @@ function createAttachmentHTML(url) {
     const fileExtension = url.split('.').pop().toLowerCase();
     let mediaHTML = '';
 
-    // Simple check for common media types for embedding
+    // Check for common media types for embedding - *** NOW INCLUDES 'gif' ***
     if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension)) {
         // Image embed
         mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
