@@ -6,26 +6,30 @@
     <!-- Load Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        :root { font-family: 'Inter', sans-serif; }
+        /* System Font Stack: Defaults to San Francisco on macOS, Segoe UI on Windows, etc. */
+        :root { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif; 
+        }
+
         /* Style the scrollbar for better aesthetics */
         #messages-container::-webkit-scrollbar { width: 8px; }
         #messages-container::-webkit-scrollbar-thumb {
-            background-color: #9ca3af;
+            background-color: #4b5563; /* Darker gray thumb */
             border-radius: 4px;
         }
         #messages-container::-webkit-scrollbar-track {
-            background-color: #f3f4f6;
+            background-color: #374151; /* Dark gray track */
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+<body class="bg-gray-800 min-h-screen flex items-center justify-center p-4">
 
-    <!-- Main Chat Container -->
-    <div class="bg-white shadow-2xl rounded-xl w-full max-w-4xl flex flex-col h-[90vh] transition-all duration-300">
+    <!-- Main Chat Container (Dark Gray Theme) -->
+    <div class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex flex-col h-[90vh] transition-all duration-300">
         <!-- Header -->
-        <header class="p-4 border-b bg-indigo-600 text-white rounded-t-xl flex justify-between items-center">
+        <header class="p-4 border-b border-gray-700 bg-indigo-700 text-white rounded-t-xl flex justify-between items-center">
             <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
-            <button id="config-toggle" class="bg-indigo-700 hover:bg-indigo-800 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
+            <button id="config-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -34,29 +38,31 @@
             </button>
         </header>
 
-        <!-- Configuration Modal/Panel -->
-        <div id="config-panel" class="p-4 bg-yellow-50 border-b hidden">
-            <h2 class="text-lg font-semibold mb-2 text-yellow-800">Discord Webhook Configuration</h2>
-            <p class="text-sm text-yellow-800 mb-3">Enter your Discord Webhook URL below to send chat messages to your group chat.</p>
+        <!-- Configuration Modal/Panel (Pre-filled and dark themed) -->
+        <div id="config-panel" class="p-4 border-b border-gray-700 bg-yellow-900 hidden">
+            <h2 class="text-lg font-semibold mb-2 text-yellow-300">Discord Webhook Configuration</h2>
+            <p class="text-sm text-yellow-300 mb-3">The default webhook is loaded automatically.</p>
             <div class="flex flex-col sm:flex-row gap-3">
-                <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL (starts with https://discord.com/api/webhooks...)" class="flex-grow p-2 border border-yellow-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-sm">
-                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Save Webhook</button>
+                <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL (starts with https://discord.com/api/webhooks...)" class="flex-grow p-2 border border-yellow-700 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-sm bg-yellow-900 text-white">
+                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Save New Webhook</button>
             </div>
             <p id="webhook-status" class="mt-2 text-sm font-medium"></p>
         </div>
 
         <!-- Chat Messages Area -->
-        <main id="messages-container" class="flex-grow p-4 overflow-y-auto space-y-4 bg-gray-50"></main>
+        <main id="messages-container" class="flex-grow p-4 overflow-y-auto space-y-4 bg-gray-900">
+             <p id="loading-status" class="text-center text-gray-400 p-4">Attempting to initialize services...</p>
+        </main>
 
         <!-- Input and Sender Details -->
-        <footer class="p-4 border-t bg-white rounded-b-xl">
+        <footer class="p-4 border-t border-gray-700 bg-gray-900 rounded-b-xl">
             <div class="mb-3">
-                <label for="sender-name" class="block text-sm font-medium text-gray-700">Your Display Name:</label>
-                <input type="text" id="sender-name" value="Student" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                <label for="sender-name" class="block text-sm font-medium text-gray-300">Your Display Name:</label>
+                <input type="text" id="sender-name" value="Student" class="w-full p-2 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 bg-gray-700 text-white">
             </div>
             <div class="flex space-x-3">
-                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 border border-gray-300 rounded-xl resize-none focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm"></textarea>
-                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-700 transition duration-150 shadow-md flex items-center justify-center w-24">
+                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 border border-gray-600 rounded-xl resize-none focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm bg-gray-700 text-white"></textarea>
+                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-500 transition duration-150 shadow-md flex items-center justify-center w-24">
                     Send
                 </button>
             </div>
@@ -68,6 +74,10 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- HARDCODED DEFAULT WEBHOOK ---
+        const DEFAULT_WEBHOOK_URL = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-";
+        // ---------------------------------
         
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
@@ -83,9 +93,13 @@
         const webhookUrlInput = document.getElementById('webhook-url-input');
         const saveWebhookButton = document.getElementById('save-webhook-button');
         const webhookStatus = document.getElementById('webhook-status');
+        const loadingStatus = document.getElementById('loading-status');
 
         let db, auth, userId = 'loading';
-        let webhookUrl = null;
+        let webhookUrl = DEFAULT_WEBHOOK_URL; // Initialize with default
+
+        // Set the default webhook into the input field
+        webhookUrlInput.value = DEFAULT_WEBHOOK_URL;
 
         // --- Utility Functions ---
 
@@ -100,7 +114,7 @@
         /** Shows a temporary status message in the webhook configuration */
         function showWebhookStatus(message, isError = false) {
             webhookStatus.textContent = message;
-            webhookStatus.className = `mt-2 text-sm font-medium ${isError ? 'text-red-600' : 'text-green-600'}`;
+            webhookStatus.className = `mt-2 text-sm font-medium ${isError ? 'text-red-400' : 'text-green-400'}`;
             setTimeout(() => { webhookStatus.textContent = ''; }, 4000);
         }
 
@@ -119,6 +133,13 @@
         // --- Firebase Initialization and Auth ---
 
         window.onload = function() {
+            if (Object.keys(firebaseConfig).length === 0) {
+                loadingStatus.textContent = "Error: Firebase configuration missing. Cannot connect to database.";
+                loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
+                console.error("Firebase config is missing.");
+                return;
+            }
+
             try {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -139,6 +160,7 @@
                     if (user) {
                         userId = user.uid;
                         console.log("Firebase initialized. User ID:", userId);
+                        // Load saved webhook URL only if different from default
                         loadWebhookUrl(userId);
                         listenForMessages();
                     } else {
@@ -148,13 +170,14 @@
 
             } catch (error) {
                 console.error("Firebase Initialization Error:", error);
-                messagesContainer.innerHTML = `<p class="text-red-500 p-4">Error initializing chat services. Check console for details.</p>`;
+                loadingStatus.textContent = "Error initializing chat services. Check console for details.";
+                loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
             }
         }
 
         // --- Discord Webhook Logic ---
         
-        // Loads the user's saved webhook URL from Firestore (Private data path)
+        // Loads the user's SAVED webhook URL from Firestore (Private data path)
         async function loadWebhookUrl(currentUserId) {
             const configPath = `/artifacts/${appId}/users/${currentUserId}/config/webhook`;
             const webhookDocRef = doc(db, configPath);
@@ -162,23 +185,23 @@
                 const docSnap = await getDoc(webhookDocRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
+                    // Override the default only if a custom one was saved
                     webhookUrl = data.url;
                     webhookUrlInput.value = webhookUrl;
-                    showWebhookStatus("Webhook URL loaded.", false);
+                    showWebhookStatus("Custom Webhook URL loaded.", false);
                 } else {
-                    showWebhookStatus("No webhook URL saved. Please configure it.", true);
+                    showWebhookStatus("Using default webhook URL.", false);
                 }
             } catch (e) {
-                console.error("Error loading webhook URL:", e);
-                showWebhookStatus("Failed to load webhook URL.", true);
+                console.error("Error loading webhook URL from Firestore:", e);
             }
         }
 
-        // Saves the webhook URL to Firestore
+        // Saves a new webhook URL to Firestore
         saveWebhookButton.addEventListener('click', async () => {
             const url = webhookUrlInput.value.trim();
-            if (!url.startsWith('http')) {
-                showWebhookStatus("Please enter a valid URL.", true);
+            if (!url.startsWith('http') || !url.includes("discord.com/api/webhooks")) {
+                showWebhookStatus("Please enter a valid Discord Webhook URL.", true);
                 return;
             }
             
@@ -198,22 +221,18 @@
 
         // Posts the message to the saved Discord webhook
         async function postToDiscord(message, senderName) {
-            if (!webhookUrl) {
-                showMessage("Webhook not configured. Message sent only to app chat.", true);
+            if (!webhookUrl || !webhookUrl.includes("discord.com/api/webhooks")) {
+                console.error("Webhook not configured or invalid.");
                 return;
             }
 
             const payload = {
                 content: message,
                 username: senderName,
+                // Using a light-colored avatar for a friendly look
+                avatar_url: "https://placehold.co/100x100/4f46e5/ffffff?text=SC" 
             };
             
-            // Check for valid Discord Webhook format
-            if (!webhookUrl.includes("discord.com/api/webhooks")) {
-                 console.error("Webhook URL does not appear to be a valid Discord link.");
-                 return;
-            }
-
             try {
                 const response = await fetch(webhookUrl, {
                     method: 'POST',
@@ -221,13 +240,11 @@
                     body: JSON.stringify(payload)
                 });
 
-                if (response.ok) {
-                    console.log("Message successfully posted to Discord webhook.");
-                } else {
-                    console.error("Failed to post message to Discord webhook:", response.status, response.statusText);
+                if (!response.ok) {
+                    console.error("Discord Webhook Error:", response.status, response.statusText);
                 }
             } catch (e) {
-                console.error("Error posting to Discord webhook:", e);
+                console.error("Network Error posting to Discord:", e);
             }
         }
         
@@ -240,6 +257,11 @@
 
         // Sends the message to Firestore and Discord
         async function sendMessage() {
+            if (!db) {
+                showMessage("Chat service not connected. Please refresh.", true);
+                return;
+            }
+
             const messageText = messageInput.value.trim();
             const senderName = senderNameInput.value.trim() || 'Anonymous';
 
@@ -261,6 +283,7 @@
                 postToDiscord(messageText, senderName);
 
                 messageInput.value = ''; // Clear input
+                messageInput.style.height = 'auto'; // Reset textarea height
                 messageInput.focus();
             } catch (e) {
                 console.error("Error sending message:", e);
@@ -288,15 +311,16 @@
             const time = formatTimestamp(data.timestamp);
             
             const alignment = isSelf ? 'self-end' : 'self-start';
-            const bgColor = isSelf ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-800';
-            const displayName = isSelf ? 'You' : data.senderName;
+            const bgColor = isSelf ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-100';
+            const displayName = data.senderName;
+            const nameColor = isSelf ? 'text-indigo-200' : 'text-gray-400';
 
             const div = document.createElement('div');
-            div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-sm ${bgColor} ${alignment}`;
+            div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-md ${bgColor} ${alignment}`;
             div.innerHTML = `
-                <div class="text-sm font-bold mb-1 ${isSelf ? 'text-indigo-100' : 'text-gray-600'}">${displayName}</div>
+                <div class="text-sm font-bold mb-1 ${nameColor}">${displayName}</div>
                 <div class="text-base whitespace-pre-wrap break-words">${data.text}</div>
-                <div class="text-xs mt-1 text-opacity-80 text-right">${time}</div>
+                <div class="text-xs mt-1 text-opacity-80 text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}">${time}</div>
             `;
             return div;
         }
@@ -305,6 +329,11 @@
         function listenForMessages() {
             const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
             const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
+
+            // Remove the loading status text once listening starts
+            if (loadingStatus) {
+                 loadingStatus.remove();
+            }
 
             // Set up real-time listener
             onSnapshot(messagesQuery, (snapshot) => {
