@@ -459,6 +459,9 @@ async function uploadFile(file) {
     progressBarFill.style.width = '50%'; // Indicate indeterminate progress
     updateFileStatus(`Uploading ${file.name}...`);
     
+    // 🛑 DEBUGGING STEP: Log the endpoint and token 🛑
+    console.log(`[UPLOAD DEBUG] Attempting POST to: ${UPLOAD_ENDPOINT} with token: ${UPLOAD_AUTH_TOKEN}`);
+    
     try {
         const response = await fetch(UPLOAD_ENDPOINT, {
             method: 'POST',
@@ -482,6 +485,7 @@ async function uploadFile(file) {
         // Wait a moment before allowing the UI to clear the progress bar
         setTimeout(() => {
             uploadProgressBar.classList.add('hidden');
+            fileStatusAndProgress.classList.add('hidden'); // Fully hide the file status area
         }, 1500);
 
         return result.url; 
@@ -490,7 +494,15 @@ async function uploadFile(file) {
         // Reset state on failure
         uploadProgressBar.classList.add('hidden'); // Hide bar
         progressBarFill.style.width = '0%';
-        updateFileStatus(`Error: ${error.message}`, true);
+        
+        // Check if it's the specific "Failed to fetch" error
+        if (error.message.includes("Failed to fetch")) {
+            updateFileStatus(`Error: Failed to fetch (Network/CORS issue). Check your UPLOAD_ENDPOINT URL and Worker status.`, true);
+        } else {
+            updateFileStatus(`Error: ${error.message}`, true);
+        }
+        
+        console.error("[UPLOAD ERROR]", error);
         
         // Clear file data on upload failure so user can retry or send text only
         attachedFile = null; 
