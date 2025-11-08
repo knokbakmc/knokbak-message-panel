@@ -20,12 +20,57 @@
         #messages-container::-webkit-scrollbar-track {
             background-color: #374151; /* Dark gray track */
         }
+
+        /* ---------------------------------- */
+        /* Animation Classes for Code Entrance */
+        /* ---------------------------------- */
+        .fade-in {
+            opacity: 1;
+            transition: opacity 1s ease-out;
+        }
+        
+        .fade-out {
+            opacity: 0;
+            transition: opacity 0.5s ease-out;
+        }
+
+        .code-box-drop {
+            /* Initial state */
+            transform: translateY(0) scale(1);
+            opacity: 1;
+            /* Target state (moved to the top) */
+            transition: all 1.5s cubic-bezier(0.4, 0, 0.2, 1); /* Custom smooth ease */
+        }
+        
+        .code-box-drop-end {
+            /* End state: positioned at top, scaled down */
+            transform: translateY(-80vh) scale(0.3);
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            z-index: 100;
+        }
+
     </style>
 </head>
 <body class="bg-gray-800 min-h-screen flex items-center justify-center p-4">
+    <!-- 1. Code Entry Screen (Initial View) -->
+    <div id="code-screen" class="w-full max-w-lg bg-gray-900 shadow-2xl rounded-xl p-8 flex flex-col items-center justify-center transition-opacity duration-500 ease-in-out">
+        <h1 class="text-3xl font-bold text-white mb-6">Enter Access Code</h1>
+        <p class="text-gray-400 mb-6 text-center">Please enter the security code to access the school chat panel.</p>
+        
+        <div id="code-box-content" class="w-full">
+            <input type="text" id="access-code-input" placeholder="Four-digit code (e.g., 1234)" maxlength="4" class="w-full p-4 text-center text-2xl tracking-widest border-2 border-indigo-600 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-300 bg-gray-700 text-white mb-4">
+            <button id="enter-code-button" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-semibold hover:bg-indigo-500 transition duration-300 shadow-lg">
+                Access Chat
+            </button>
+            <p id="code-error" class="text-red-400 mt-4 text-center opacity-0 transition-opacity duration-300">Invalid code. Please try again.</p>
+        </div>
+    </div>
 
-    <!-- Main Chat Container (Dark Gray Theme) -->
-    <div class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex flex-col h-[90vh] transition-all duration-300">
+
+    <!-- 2. Main Chat Container (Hidden by Default) -->
+    <div id="chat-panel" class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex-col h-[90vh] transition-all duration-300 hidden opacity-0">
         <!-- Header -->
         <header class="p-4 border-b border-gray-700 bg-indigo-700 text-white rounded-t-xl flex justify-between items-center">
             <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
@@ -44,7 +89,7 @@
             <p class="text-sm text-yellow-300 mb-3">The default webhook is loaded automatically.</p>
             <div class="flex flex-col sm:flex-row gap-3">
                 <input type="url" id="webhook-url-input" placeholder="Enter Discord Webhook URL (starts with https://discord.com/api/webhooks...)" class="flex-grow p-2 border border-yellow-700 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-sm bg-yellow-900 text-white">
-                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Save New Webhook</button>
+                <button id="save-webhook-button" class="bg-yellow-500 text-white p-2 rounded-lg font-medium hover:bg-yellow-600 transition duration-150 shadow-md">Update Webhook (Session Only)</button>
             </div>
             <p id="webhook-status" class="mt-2 text-sm font-medium"></p>
         </div>
@@ -67,21 +112,41 @@
                 </button>
             </div>
         </footer>
-    </div>
-
-    <!-- Firebase SDKs and Logic -->
+    </div><!-- Firebase SDKs and Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        // --- HARDCODED DEFAULT WEBHOOK ---
+        // =================================
+        // 1. CONFIGURATION (EDIT ME)
+        // =================================
+        
+        // --- Access Codes (Edit this list!) ---
+        const ACCESS_CODES = [
+            "2879556054",  // David
+            "0009029674",  // Camden
+            "5815287646",   // Garrett
+            "0269927548", // Isaac
+            "7950368985", // Amir
+        ];
+        
+        // --- Hardcoded Discord Webhook URL ---
         const DEFAULT_WEBHOOK_URL = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-";
-        // ---------------------------------
         
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // --- Placeholder Firebase Config (Fixes Deployment Error) ---
+        // This public-facing config is required for external hosting. 
+        const firebaseConfig = {
+             apiKey: "AIzaSy_FAKE_KEY", 
+             authDomain: "default-app-id.firebaseapp.com",
+             projectId: "default-app-id", 
+             storageBucket: "default-app-id.appspot.com",
+             messagingSenderId: "123456789012", 
+             appId: "1:123456789012:web:abcdef0123456789"
+        };
+        const appId = 'public-chat-app'; // Used for Firestore collection pathing
+        // =================================
+        
         
         // UI Elements
         const messagesContainer = document.getElementById('messages-container');
@@ -94,6 +159,14 @@
         const saveWebhookButton = document.getElementById('save-webhook-button');
         const webhookStatus = document.getElementById('webhook-status');
         const loadingStatus = document.getElementById('loading-status');
+        
+        // Code Entry Elements
+        const codeScreen = document.getElementById('code-screen');
+        const codeBoxContent = document.getElementById('code-box-content');
+        const accessCodeInput = document.getElementById('access-code-input');
+        const enterCodeButton = document.getElementById('enter-code-button');
+        const codeError = document.getElementById('code-error');
+        const chatPanel = document.getElementById('chat-panel');
 
         let db, auth, userId = 'loading';
         let webhookUrl = DEFAULT_WEBHOOK_URL; // Initialize with default
@@ -130,38 +203,77 @@
             }, 5000);
         }
         
+        // --- Code Entry Logic ---
+        
+        // Handles the visual animation and transition to the chat panel
+        function startChatTransition() {
+            // 1. Start the code box animation
+            codeBoxContent.classList.add('code-box-drop-end');
+            codeScreen.style.alignItems = 'flex-start'; // Adjust alignment for animation
+
+            // 2. Hide the main code screen background
+            setTimeout(() => {
+                codeScreen.classList.add('fade-out');
+            }, 500);
+
+            // 3. Start the Firebase initialization and fade in the chat panel
+            setTimeout(() => {
+                codeScreen.classList.add('hidden');
+                
+                // Show chat panel and start fade-in
+                chatPanel.classList.remove('hidden');
+                setTimeout(() => {
+                    chatPanel.classList.add('fade-in');
+                    chatPanel.style.opacity = '1';
+                }, 50);
+
+                // Initialize Firebase services
+                initFirebase();
+            }, 1000);
+        }
+
+        // Handles the code verification
+        function checkCode() {
+            const enteredCode = accessCodeInput.value.trim();
+            if (ACCESS_CODES.includes(enteredCode)) {
+                codeError.classList.remove('opacity-100');
+                codeError.classList.add('opacity-0');
+                startChatTransition();
+            } else {
+                codeError.classList.remove('opacity-0');
+                codeError.classList.add('opacity-100');
+            }
+        }
+
+        enterCodeButton.addEventListener('click', checkCode);
+        accessCodeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                checkCode();
+            }
+        });
+
         // --- Firebase Initialization and Auth ---
 
-        window.onload = function() {
-            if (Object.keys(firebaseConfig).length === 0) {
-                loadingStatus.textContent = "Error: Firebase configuration missing. Cannot connect to database.";
-                loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
-                console.error("Firebase config is missing.");
-                return;
-            }
-
+        function initFirebase() {
             try {
+                // Initialize Firebase with the placeholder config (Fixes external deployment issue)
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in logic
-                if (initialAuthToken) {
-                    signInWithCustomToken(auth, initialAuthToken).catch(e => {
-                        console.error("Custom token sign-in failed. Falling back to anonymous.", e);
-                        signInAnonymously(auth);
-                    });
-                } else {
-                    signInAnonymously(auth);
-                }
+                // Sign in anonymously for simple public access
+                signInAnonymously(auth).catch(e => {
+                    console.error("Anonymous sign-in failed:", e);
+                    loadingStatus.textContent = "Error signing in to Firebase. Check console.";
+                    loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
+                });
 
                 // Authentication state change listener
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         console.log("Firebase initialized. User ID:", userId);
-                        // Load saved webhook URL only if different from default
-                        loadWebhookUrl(userId);
+                        showWebhookStatus("Using default hardcoded webhook URL.", false); 
                         listenForMessages();
                     } else {
                         console.log("User is signed out or waiting for sign-in.");
@@ -177,27 +289,7 @@
 
         // --- Discord Webhook Logic ---
         
-        // Loads the user's SAVED webhook URL from Firestore (Private data path)
-        async function loadWebhookUrl(currentUserId) {
-            const configPath = `/artifacts/${appId}/users/${currentUserId}/config/webhook`;
-            const webhookDocRef = doc(db, configPath);
-            try {
-                const docSnap = await getDoc(webhookDocRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    // Override the default only if a custom one was saved
-                    webhookUrl = data.url;
-                    webhookUrlInput.value = webhookUrl;
-                    showWebhookStatus("Custom Webhook URL loaded.", false);
-                } else {
-                    showWebhookStatus("Using default webhook URL.", false);
-                }
-            } catch (e) {
-                console.error("Error loading webhook URL from Firestore:", e);
-            }
-        }
-
-        // Saves a new webhook URL to Firestore
+        // This button now only updates the webhookUrl in the current browser session.
         saveWebhookButton.addEventListener('click', async () => {
             const url = webhookUrlInput.value.trim();
             if (!url.startsWith('http') || !url.includes("discord.com/api/webhooks")) {
@@ -205,18 +297,9 @@
                 return;
             }
             
-            const configPath = `/artifacts/${appId}/users/${userId}/config/webhook`;
-            const webhookDocRef = doc(db, configPath);
-
-            try {
-                await setDoc(webhookDocRef, { url: url });
-                webhookUrl = url;
-                showWebhookStatus("Webhook URL saved successfully!", false);
-                showMessage("Webhook saved!");
-            } catch (e) {
-                console.error("Error saving webhook URL:", e);
-                showWebhookStatus("Failed to save webhook URL.", true);
-            }
+            webhookUrl = url;
+            showWebhookStatus("Webhook URL updated in session only.", false);
+            showMessage("Webhook updated for this session!");
         });
 
         // Posts the message to the saved Discord webhook
@@ -267,6 +350,7 @@
 
             if (messageText === "") return;
             
+            // Public data path
             const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
             const messagesRef = collection(db, messagesCollectionPath);
 
