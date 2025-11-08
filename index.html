@@ -164,572 +164,564 @@
         </div>
     </div>
 
-    <!-- Firebase SDKs and Logic -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // =================================
-        // 1. CONFIGURATION (EDIT ME)
-        // =================================
-        
-        // --- Access Codes (10 digits) ---
-         const ACCESS_CODES = [
-            "2879556054",  // David
-            "0009029674",  // Camden
-            "5815287646",   // Garrett
-            "0269927548", // Isaac
-            "7950368985", // Amir
-        ];
-        
-        // --- Placeholder Firebase Config (Fallback for External Hosting) ---
-        const PLACEHOLDER_FIREBASE_CONFIG = {
-             apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
-             authDomain: "knokbak-message-panel.firebaseapp.com",
-             projectId: "knokbak-message-panel", 
-             storageBucket: "knokbak-message-panel.firebasestorage.app",
-             messagingSenderId: "424259711684", 
-             appId: "1:424259711684:web:6818525d64024815604f91"
-        };
-        const PLACEHOLDER_APP_ID = 'knokbak-message-panel'; 
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- NEW: File Upload Configuration ---
-        const MAX_FILE_SIZE_MB = 500;
-        // !!! REPLACE THIS WITH YOUR REAL UPLOAD ENDPOINT URL !!!
-        // This is the URL of your Cloudflare Worker or API endpoint.
-        const UPLOAD_ENDPOINT = "YOUR_CLOUDFLARE_WORKER_UPLOAD_ENDPOINT"; 
-        // Base URL for the public file link
-        const CDN_BASE_URL = "https://cdna.knokbak.com/software/share/";
-        // =================================
-        
-        
-        // UI Elements
-        const messagesContainer = document.getElementById('messages-container');
-        const messageInput = document.getElementById('message-input');
-        const sendButton = document.getElementById('send-button');
-        const senderNameInput = document.getElementById('sender-name');
-        const configPanel = document.getElementById('config-panel');
-        const configToggle = document.getElementById('config-toggle');
-        const webhookUrlInput = document.getElementById('webhook-url-input');
-        const saveWebhookButton = document.getElementById('save-webhook-button');
-        const webhookStatus = document.getElementById('webhook-status');
-        const loadingStatus = document.getElementById('loading-status');
-        
-        // Code Entry Elements
-        const codeScreen = document.getElementById('code-screen');
-        const codeBoxContent = document.getElementById('code-box-content');
-        const accessCodeInput = document.getElementById('access-code-input');
-        const enterCodeButton = document.getElementById('enter-code-button');
-        const codeError = document.getElementById('code-error');
-        const chatPanel = document.getElementById('chat-panel');
+// =================================
+// 1. CONFIGURATION (EDIT ME)
+// =================================
 
-        // Changelog Elements
-        const changelogToggle = document.getElementById('changelog-toggle');
-        const changelogModalBg = document.getElementById('changelog-modal-bg');
-        const closeChangelogButton = document.getElementById('close-changelog-button');
-        const newMessageIndicator = document.getElementById('new-message-indicator');
-        
-        // NEW: File Upload Elements
-        const fileInput = document.getElementById('file-input');
-        const selectFileButton = document.getElementById('select-file-button');
-        const fileStatus = document.getElementById('file-status');
-        const fileNameDisplay = document.getElementById('file-name-display');
-        const clearFileButton = document.getElementById('clear-file-button');
-        const fileStatusAndProgress = document.getElementById('file-status-and-progress'); // New container
-        const uploadProgressBar = document.getElementById('upload-progress-bar');
-        const progressBarFill = document.getElementById('progress-bar-fill');
-        
-        let db, auth, userId = 'loading';
-        let currentAppId = PLACEHOLDER_APP_ID; 
-        let webhookUrl = webhookUrlInput.value;
-        let isChangelogOpen = false;
-        let newMessageCount = 0;
-        let attachedFile = null; // Holds the file object once selected
-        let uploadedFileUrl = null; // Holds the URL after successful upload
+// --- Access Codes (10 digits) ---
+const ACCESS_CODES = [
+"2879556054", // David
+"0009029674", // Camden
+"5815287646", // Garrett
+"0269927548", // Isaac
+"7950368985", // Amir
+];
 
-        // --- Utility Functions ---
+// --- Placeholder Firebase Config (Fallback for External Hosting) ---
+const PLACEHOLDER_FIREBASE_CONFIG = {
+apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc",
+authDomain: "knokbak-message-panel.firebaseapp.com",
+projectId: "knokbak-message-panel",
+storageBucket: "knokbak-message-panel.firebasestorage.app",
+messagingSenderId: "424259711684",
+appId: "1:424259711684:web:6818525d64024815604f91"
+};
+const PLACEHOLDER_APP_ID = 'knokbak-message-panel';
 
-        /** Formats a timestamp object for display */
-        function formatTimestamp(timestamp) {
-            if (timestamp && timestamp.toDate) {
-                return timestamp.toDate().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+// --- NEW: File Upload Configuration ---
+const MAX_FILE_SIZE_MB = 500;
+// !!! LIVE UPLOAD ENDPOINT URL !!!
+// This is the URL of your Cloudflare Worker or API endpoint.
+const UPLOAD_ENDPOINT = "https://school-upload-worker-endpoint.garrett23-main-garrettlol.workers.dev";
+// The secret token used for Worker authentication.
+const UPLOAD_AUTH_TOKEN = "Sch00lUpl0ad2025";
+// Base URL for the public file link
+const CDN_BASE_URL = "https://cdna.knokbak.com/software/share/";
+// =================================
+
+
+// 2. GLOBAL VARIABLES
+let app, db, auth, userId = null;
+let currentAppId = PLACEHOLDER_APP_ID; // Initialize with fallback
+let attachedFile = null; // Stores the file object selected by the user
+let uploadedFileUrl = null; // Stores the URL returned after a successful upload
+let webhookUrl = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-"; // Default/initial value from HTML
+
+// Changelog/Notification Variables
+let isChangelogOpen = false;
+let newMessageCount = 0;
+let lastChangelogCheck = Date.now();
+let lastMessageTimestamp = 0;
+
+
+// 3. ELEMENT REFERENCES (Defined here for scope access)
+const messagesContainer = document.getElementById('messages-container');
+const loadingStatus = document.getElementById('loading-status');
+const codeScreen = document.getElementById('code-screen');
+const chatPanel = document.getElementById('chat-panel');
+const accessCodeInput = document.getElementById('access-code-input');
+const codeError = document.getElementById('code-error');
+const enterCodeButton = document.getElementById('enter-code-button');
+const changelogToggle = document.getElementById('changelog-toggle');
+const changelogModalBg = document.getElementById('changelog-modal-bg');
+const closeChangelogButton = document.getElementById('close-changelog-button');
+const configToggle = document.getElementById('config-toggle');
+const configPanel = document.getElementById('config-panel');
+const webhookUrlInput = document.getElementById('webhook-url-input');
+const saveWebhookButton = document.getElementById('save-webhook-button');
+const webhookStatus = document.getElementById('webhook-status');
+const fileInput = document.getElementById('file-input');
+const selectFileButton = document.getElementById('select-file-button');
+const clearFileButton = document.getElementById('clear-file-button');
+const messageInput = document.getElementById('message-input');
+const sendButton = document.getElementById('send-button');
+const senderNameInput = document.getElementById('sender-name');
+const fileNameDisplay = document.getElementById('file-name-display');
+const fileStatusAndProgress = document.getElementById('file-status-and-progress');
+const uploadProgressBar = document.getElementById('upload-progress-bar');
+const progressBarFill = document.getElementById('progress-bar-fill');
+const newMsgIndicator = document.getElementById('new-message-indicator');
+const webhookStatusElement = document.getElementById('webhook-status');
+
+
+// 4. UTILITY FUNCTIONS (Unchanged)
+// ... (Your original code for utility functions: formatTimestamp, debounce, showMessage, showWebhookStatus)
+
+function formatTimestamp(timestamp) {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function debounce(func, delay) {
+    let timeout;
+    return (...args) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), delay);
+    };
+}
+
+function showMessage(message, isError = false) {
+    codeError.textContent = message;
+    codeError.classList.remove('text-red-400', 'text-green-400', 'opacity-0');
+    codeError.classList.add(isError ? 'text-red-400' : 'text-green-400', 'opacity-100');
+    // Hide after 5 seconds if not an error
+    if (!isError) {
+        setTimeout(() => {
+            codeError.classList.add('opacity-0');
+        }, 5000);
+    }
+}
+
+function showWebhookStatus(message, isError = false) {
+    webhookStatusElement.textContent = message;
+    webhookStatusElement.className = `mt-2 text-sm font-medium ${isError ? 'text-red-400' : 'text-green-400'}`;
+}
+
+
+// 5. APPLICATION LOGIC (Unchanged)
+// ... (Your original code for: updateNotificationBadge, sendBrowserNotification, initializeFirebase, validateCode)
+
+// Update the notification badge on the changelog button
+function updateNotificationBadge() {
+    if (newMessageCount > 0) {
+        newMsgIndicator.textContent = newMessageCount;
+        newMsgIndicator.classList.remove('hidden');
+    } else {
+        newMsgIndicator.classList.add('hidden');
+    }
+}
+
+// Send a desktop notification
+function sendBrowserNotification(senderName, message) {
+    if (!document.hidden || !("Notification" in window)) return;
+    
+    // Request permission if not granted
+    if (Notification.permission === "default") {
+        Notification.requestPermission();
+        return;
+    }
+    
+    if (Notification.permission === "granted") {
+        new Notification(`${senderName} sent a message:`, {
+            body: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+            icon: 'https://placehold.co/100x100/4f46e5/ffffff?text=SC', // Icon for the school chat
+        });
+    }
+}
+
+
+// Initialize Firebase
+async function initializeFirebase() {
+    let config = PLACEHOLDER_FIREBASE_CONFIG;
+    let appId = PLACEHOLDER_APP_ID;
+
+    // Check for global config from Canvas (higher priority)
+    if (typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0) {
+        config = JSON.parse(__firebase_config);
+    }
+    if (typeof __app_id !== 'undefined') {
+        appId = __app_id;
+    }
+
+    currentAppId = appId;
+    
+    try {
+        app = initializeApp(config);
+        db = getFirestore(app);
+        auth = getAuth(app);
+        
+        // setLogLevel('debug'); // Uncomment for debugging
+        
+        // Handle custom auth token if available (e.g., from Canvas)
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (initialAuthToken) {
+            await signInWithCustomToken(auth, initialAuthToken);
+        } else {
+            await signInAnonymously(auth);
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            userId = user ? user.uid : crypto.randomUUID();
+            console.log("Authenticated User ID:", userId);
+        });
+        
+        return true;
+    } catch (e) {
+        console.error("Firebase initialization failed:", e);
+        showMessage("Firebase connection error. Check console.", true);
+        return false;
+    }
+}
+
+// Check access code validity and log the user in
+async function validateCode(code) {
+    const codeInput = code.toUpperCase().trim();
+    if (codeInput.length !== 10) {
+        showMessage("Code must be 10 characters long.", true);
+        return;
+    }
+    
+    if (!db) {
+        showMessage("Database not connected. Please wait.", true);
+        return;
+    }
+
+    // --- Access Code Logic ---
+    // In a real scenario, this would check a Firestore/DB collection.
+    // For this demonstration, we are validating against a hardcoded list.
+    const validNames = {
+        "2879556054": "David",
+        "0009029674": "Camden",
+        "5815287646": "Garrett",
+        "0269927548": "Isaac",
+        "7950368985": "Amir",
+        "STUDENT123": "Student-User" // Fallback name
+    };
+    
+    const isValid = ACCESS_CODES.includes(codeInput) || Object.keys(validNames).includes(codeInput);
+
+    if (isValid) {
+        const userName = validNames[codeInput] || 'Authenticated User';
+        
+        senderNameInput.value = userName; // Set the display name input
+        
+        codeScreen.classList.add('hidden');
+        chatPanel.classList.remove('hidden', 'opacity-0');
+        chatPanel.classList.add('opacity-100');
+        
+        // Start listening to the chat after successful validation
+        listenForMessages();
+
+    } else {
+        showMessage("Invalid code. Access denied.", true);
+    }
+}
+
+
+// --- File Upload Handling ---
+
+selectFileButton.addEventListener('click', () => fileInput.click());
+clearFileButton.addEventListener('click', clearAttachedFile);
+
+fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+        clearAttachedFile();
+        return;
+    }
+
+    // Check file size limit
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        showMessage(`File size exceeds the ${MAX_FILE_SIZE_MB}MB limit.`, true);
+        clearAttachedFile();
+        return;
+    }
+
+    attachedFile = file;
+    fileNameDisplay.textContent = file.name;
+    fileStatusAndProgress.classList.remove('hidden');
+    showMessage(`File selected: ${file.name}`);
+});
+
+function clearAttachedFile() {
+    attachedFile = null;
+    uploadedFileUrl = null;
+    fileInput.value = '';
+    fileStatusAndProgress.classList.add('hidden');
+    progressBarFill.style.width = '0%';
+}
+
+/**
+ * Uploads the attached file to the Cloudflare Worker endpoint.
+ * This replaces the simulated upload logic with a real fetch request.
+ */
+async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // START: Loading/Progress State (Preserved from old simulated function)
+    fileStatusAndProgress.classList.remove('hidden');
+    uploadProgressBar.classList.remove('hidden');
+    progressBarFill.style.width = '50%'; // Indicate indeterminate progress
+    sendButton.disabled = true;
+    // END: Loading/Progress State
+    
+    try {
+        const response = await fetch(UPLOAD_ENDPOINT, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Upload-Auth': UPLOAD_AUTH_TOKEN
             }
-            return 'Sending...';
+        });
+
+        if (!response.ok) {
+            const errorData = await response.text();
+            throw new Error(`Upload failed: ${response.status} - ${errorData}`);
         }
 
-        /** Shows a temporary status message in the webhook configuration */
-        function showWebhookStatus(message, isError = false) {
-            webhookStatus.textContent = message;
-            webhookStatus.className = `mt-2 text-sm font-medium ${isError ? 'text-red-400' : 'text-green-400'}`;
-            setTimeout(() => { webhookStatus.textContent = ''; }, 4000);
-        }
-
-        /** Simple custom alert/message box */
-        function showMessage(text, isError = false) {
-            const tempDiv = document.createElement('div');
-            tempDiv.textContent = text;
-            tempDiv.className = `fixed top-4 right-4 p-3 rounded-lg shadow-xl text-white font-semibold z-50 transition-opacity duration-300 ${isError ? 'bg-red-600' : 'bg-green-600'}`;
-            document.body.appendChild(tempDiv);
-            setTimeout(() => {
-                tempDiv.style.opacity = '0';
-                tempDiv.addEventListener('transitionend', () => tempDiv.remove());
-            }, 5000);
-        }
+        const result = await response.json();
         
-        // --- Code Entry and Animation Logic ---
+        // Finalize progress bar and button state
+        progressBarFill.style.width = '100%';
+        sendButton.disabled = false;
         
-        function startChatTransition() {
-            // 1. Setup the animation properties on the code box content
-            codeBoxContent.style.transition = 'all 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
-            codeBoxContent.style.position = 'fixed';
-            codeBoxContent.style.zIndex = '100';
+        // The Worker returns { success: true, url: '...', fileName: '...' }
+        // We return the URL string for the caller (sendMessage) to use.
+        return result.url; 
 
-            // Center the element relative to the body before starting the move
-            const rect = codeBoxContent.getBoundingClientRect();
-            codeBoxContent.style.left = `${rect.left}px`;
-            codeBoxContent.style.top = `${rect.top}px`;
-            codeBoxContent.style.width = `${rect.width}px`;
+    } catch (error) {
+        // Reset button state on failure
+        sendButton.disabled = false;
+        progressBarFill.style.width = '0%';
+        throw error;
+    }
+}
 
-            // 2. Start the move/scale animation (the "raindrop" effect)
-            setTimeout(() => {
-                codeBoxContent.style.transform = 'translateY(-80vh) scale(0.3)';
-                codeScreen.classList.add('opacity-0'); // Fade out the background container
-            }, 50); 
-            
-            // 3. Complete the transition and show the chat panel
-            setTimeout(() => {
-                codeScreen.classList.add('hidden');
-                
-                // Show chat panel and start fade-in
-                chatPanel.classList.remove('hidden');
-                setTimeout(() => {
-                    chatPanel.classList.add('fade-in');
-                    chatPanel.style.opacity = '1';
-                }, 50);
+// --- Chat Messaging Logic ---
 
-                // Initialize Firebase services
-                initFirebase();
-            }, 1500); // Wait for the full 1.5s transition
+// Sends the message to Firestore and Discord
+async function sendMessage() {
+    if (!db) {
+        showMessage("Chat service not connected. Please refresh.", true);
+        return;
+    }
+
+    const messageText = messageInput.value.trim();
+    const senderName = senderNameInput.value.trim() || 'Anonymous';
+
+    // Prevent sending empty message AND no attached file
+    if (messageText === "" && !attachedFile) return;
+
+    // If a file is attached, upload it first
+    if (attachedFile && !uploadedFileUrl) {
+        try {
+            uploadedFileUrl = await uploadFile(attachedFile);
+        } catch (e) {
+            console.error("File upload failed:", e);
+            showMessage('File upload failed: ' + e.message, true);
+            clearAttachedFile();
+            return;
         }
+    }
 
-        // Handles the code verification
-        function checkCode() {
-            const enteredCode = accessCodeInput.value.trim();
-            if (ACCESS_CODES.includes(enteredCode)) {
-                codeError.classList.remove('opacity-100');
-                codeError.classList.add('opacity-0');
-                startChatTransition();
-            } else {
-                codeError.classList.remove('opacity-0');
-                codeError.classList.add('opacity-100');
+    // Public data path uses the dynamically determined currentAppId
+    const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
+    const messagesRef = collection(db, messagesCollectionPath);
+
+    try {
+        // 1. Save to Firestore
+        await setDoc(doc(messagesRef), {
+            text: messageText,
+            timestamp: serverTimestamp(),
+            senderName: senderName,
+            senderId: userId,
+            attachmentUrl: uploadedFileUrl
+        });
+
+        // 2. Post to Discord (webhook) - Non-blocking
+        postToDiscord(messageText, senderName, uploadedFileUrl);
+
+        // 3. Cleanup
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        messageInput.focus();
+        clearAttachedFile();
+
+    } catch (e) {
+        console.error("Error sending message:", e);
+        showMessage('Failed to send message: ' + e.message, true);
+    }
+}
+
+sendButton.addEventListener('click', sendMessage);
+messageInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); // Prevents newline
+        sendMessage();
+    }
+});
+
+// Auto-resize textarea
+messageInput.addEventListener('input', () => {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = messageInput.scrollHeight + 'px';
+});
+
+// Creates a media embed/link based on file type
+function createAttachmentHTML(url) {
+    if (!url) return '';
+
+    const fileExtension = url.split('.').pop().toLowerCase();
+    let mediaHTML = '';
+
+    // Simple check for common media types for embedding
+    if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension)) {
+        // Image embed
+        mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
+    } else if (['mp4', 'webm'].includes(fileExtension)) {
+        // Video embed
+        mediaHTML = `<video src="${url}" controls class="max-w-full h-auto rounded-lg mt-2"></video>`;
+    } else {
+        // General file link (like Discord)
+        mediaHTML = `<a href="${url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline block mt-2 break-words">📎 Attachment: ${url.split('/').pop()}</a>`;
+    }
+
+    return `<div class="bg-gray-800 p-2 rounded-lg border border-gray-700 mt-2">${mediaHTML}</div>`;
+}
+
+
+// Creates a message bubble HTML element
+function createMessageElement(data) {
+    const isSelf = data.senderId === userId;
+    const time = formatTimestamp(data.timestamp);
+    const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
+
+    const alignment = isSelf ? 'self-end' : 'self-start';
+    const bgColor = isSelf ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-100';
+    const displayName = data.senderName;
+    const nameColor = isSelf ? 'text-indigo-200' : 'text-gray-400';
+
+    const div = document.createElement('div');
+    div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-md ${bgColor} ${alignment}`;
+    div.innerHTML = `
+    <div class="text-sm font-bold mb-1 ${nameColor}">${displayName}</div>
+    <div class="text-base whitespace-pre-wrap break-words">${data.text || ''}</div>
+    ${attachmentHTML}
+    <div class="text-xs mt-1 text-opacity-80 text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}">${time}</div>
+    `;
+    return div;
+}
+
+// Listens for real-time messages from Firestore
+function listenForMessages() {
+    // Public data path uses the dynamically determined currentAppId
+    const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
+    const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
+
+    // Remove the loading status text once listening starts
+    if (loadingStatus) {
+        loadingStatus.remove();
+    }
+
+    // Set up real-time listener
+    onSnapshot(messagesQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            const data = { id: change.doc.id, ...change.doc.data() };
+
+            if (change.type === "added") {
+                const newElement = createMessageElement(data);
+                messagesContainer.appendChild(newElement);
+
+                // Check if the message is NOT from the current user
+                if (data.senderId !== userId) {
+                    // 1. Send Desktop Notification if window is hidden
+                    sendBrowserNotification(data.senderName, data.text);
+
+                    // 2. Handle Changelog badge update
+                    if (isChangelogOpen) {
+                        newMessageCount++;
+                        updateNotificationBadge();
+                    }
+                }
+
+                // Scroll to bottom only if changelog is NOT open
+                if (!isChangelogOpen) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
             }
-        }
+        });
+    }, (error) => {
+        console.error("Error listening to messages:", error);
+        messagesContainer.innerHTML = `<p class="text-red-500 p-4">Failed to load chat history.</p>`;
+    });
+}
 
-        enterCodeButton.addEventListener('click', checkCode);
+// Toggle Changelog Modal
+changelogToggle.addEventListener('click', () => {
+    isChangelogOpen = true;
+    changelogModalBg.style.display = 'flex';
+    // Clear notification badge when changelog is opened
+    newMessageCount = 0;
+    updateNotificationBadge();
+});
+
+closeChangelogButton.addEventListener('click', () => {
+    isChangelogOpen = false;
+    changelogModalBg.style.display = 'none';
+});
+
+// Discord Webhook configuration logic
+saveWebhookButton.addEventListener('click', () => {
+    const url = webhookUrlInput.value.trim();
+    if (!url || !url.includes("discord.com/api/webhooks")) {
+        showWebhookStatus("Invalid URL. Must be a Discord webhook link.", true);
+        return;
+    }
+
+    webhookUrl = url;
+    webhookUrlInput.value = url;
+    showWebhookStatus("Webhook URL updated in session only.", false);
+    showMessage("Webhook updated for this session!");
+});
+
+// Posts the message to the saved Discord webhook
+async function postToDiscord(message, senderName, attachmentUrl = null) {
+    if (!webhookUrl || !webhookUrl.includes("discord.com/api/webhooks")) {
+        console.error("Webhook not configured or invalid.");
+        return;
+    }
+
+    const payload = {
+        content: message,
+        username: senderName,
+        avatar_url: "https://placehold.co/100x100/4f46e5/ffffff?text=SC"
+    };
+
+    if (attachmentUrl) {
+        payload.content = payload.content.trim() + (payload.content.trim() ? '\n\n' : '') + attachmentUrl;
+    }
+
+    try {
+        await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    } catch (e) {
+        console.error("Network Error posting to Discord:", e);
+    }
+}
+
+// Toggle Configuration Panel
+configToggle.addEventListener('click', () => {
+    configPanel.classList.toggle('hidden');
+});
+
+
+// Initialization
+document.addEventListener('DOMContentLoaded', async () => {
+    // Initial check for notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+    
+    // Check for Canvas environment configuration and initialize Firebase
+    if (await initializeFirebase()) {
+        enterCodeButton.addEventListener('click', () => validateCode(accessCodeInput.value));
         accessCodeInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                checkCode();
-            }
+            if (e.key === 'Enter') validateCode(accessCodeInput.value);
         });
-
-        // --- Firebase Initialization and Auth ---
-
-        async function initFirebase() {
-            try {
-                // ** CRITICAL: Set log level to debug for detailed console output **
-                setLogLevel('debug'); 
-                console.log("Firebase debug logging enabled. Check console for detailed connection messages.");
-
-                // Determine configuration based on environment variables availability
-                const isCanvasRuntime = typeof __firebase_config !== 'undefined';
-                let configToUse = PLACEHOLDER_FIREBASE_CONFIG;
-                
-                if (isCanvasRuntime) {
-                    // Use actual Canvas variables if available
-                    configToUse = JSON.parse(__firebase_config);
-                    currentAppId = typeof __app_id !== 'undefined' ? __app_id : PLACEHOLDER_APP_ID;
-                    console.log("Using Canvas runtime Firebase config. App ID:", currentAppId);
-                } else {
-                    console.log("Using Placeholder Firebase config.");
-                }
-
-                // 1. Initialize App and Services
-                const app = initializeApp(configToUse);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                // 2. Handle Authentication
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                    console.log("Firebase signed in with Custom Token (Canvas).");
-                } else {
-                    await signInAnonymously(auth);
-                    console.log("Firebase signed in Anonymously (External).");
-                }
-
-                // 3. Set up Auth State Change Listener to start chat features
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Auth success. User ID:", userId);
-                        showWebhookStatus("Using default hardcoded webhook URL.", false); 
-                        requestNotificationPermission(); // Request permission after successful auth
-                        listenForMessages(); // Start listening once authenticated
-                    } else {
-                        console.log("User is signed out or waiting for sign-in.");
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase Initialization Error (FATAL):", error);
-                loadingStatus.textContent = "Error initializing chat services. Check console for details. (Likely Firewall/CSP block)";
-                loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
-            }
-        }
-        // --- Changelog/Notification Logic ---
-
-        function updateNotificationBadge() {
-            if (newMessageCount > 0) {
-                newMessageIndicator.textContent = newMessageCount;
-                newMessageIndicator.classList.remove('hidden');
-            } else {
-                newMessageIndicator.classList.add('hidden');
-            }
-        }
-
-        function openChangelog() {
-            isChangelogOpen = true;
-            // Hide the chat panel and show the modal overlay
-            chatPanel.style.display = 'none';
-            changelogModalBg.style.display = 'flex';
-        }
-
-        function closeChangelog() {
-            isChangelogOpen = false;
-            // Hide the modal overlay and show the chat panel
-            changelogModalBg.style.display = 'none';
-            chatPanel.style.display = 'flex';
-            
-            // Reset notifications when returning to chat
-            newMessageCount = 0;
-            updateNotificationBadge();
-        }
-
-        changelogToggle.addEventListener('click', openChangelog);
-        closeChangelogButton.addEventListener('click', closeChangelog);
-
-
-        // --- Browser Notification Logic ---
-
-        function requestNotificationPermission() {
-            if ('Notification' in window) {
-                if (Notification.permission === 'default') {
-                    Notification.requestPermission().then(permission => {
-                        if (permission === 'granted') {
-                             showMessage("Desktop notifications enabled.");
-                        } else if (permission === 'denied') {
-                             console.warn("Desktop notifications denied by user.");
-                        }
-                    });
-                } else if (Notification.permission === 'granted') {
-                    console.log("Desktop notification permission already granted.");
-                }
-            }
-        }
-        
-        function sendBrowserNotification(senderName, messageText) {
-            if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-                const finalMessage = messageText || "Sent an attachment.";
-                new Notification(`New Message from ${senderName}`, {
-                    body: finalMessage.length > 50 ? finalMessage.substring(0, 47) + '...' : finalMessage,
-                    icon: 'https://placehold.co/100x100/4f46e5/ffffff?text=SC' // Simple icon placeholder
-                });
-            }
-        }
-
-
-        // --- Discord Webhook Logic ---
-        
-        saveWebhookButton.addEventListener('click', async () => {
-            const url = webhookUrlInput.value.trim();
-            if (!url.startsWith('http') || !url.includes("discord.com/api/webhooks")) {
-                showWebhookStatus("Please enter a valid Discord Webhook URL.", true);
-                return;
-            }
-            
-            webhookUrl = url;
-            webhookUrlInput.value = url;
-            showWebhookStatus("Webhook URL updated in session only.", false);
-            showMessage("Webhook updated for this session!");
-        });
-
-        // Posts the message to the saved Discord webhook
-        async function postToDiscord(message, senderName, attachmentUrl = null) {
-            if (!webhookUrl || !webhookUrl.includes("discord.com/api/webhooks")) {
-                console.error("Webhook not configured or invalid.");
-                return;
-            }
-
-            const payload = {
-                content: message,
-                username: senderName,
-                avatar_url: "https://placehold.co/100x100/4f46e5/ffffff?text=SC" 
-            };
-
-            if (attachmentUrl) {
-                 payload.content = payload.content.trim() + (payload.content.trim() ? '\n\n' : '') + attachmentUrl;
-            }
-            
-            try {
-                await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            } catch (e) {
-                console.error("Network Error posting to Discord:", e);
-            }
-        }
-        
-        // Toggle Configuration Panel
-        configToggle.addEventListener('click', () => {
-            configPanel.classList.toggle('hidden');
-        });
-
-
-        // --- File Upload Handling ---
-        
-        selectFileButton.addEventListener('click', () => fileInput.click());
-        clearFileButton.addEventListener('click', clearAttachedFile);
-
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) {
-                clearAttachedFile();
-                return;
-            }
-
-            // Check file size limit
-            if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-                showMessage(`File size exceeds the ${MAX_FILE_SIZE_MB}MB limit.`, true);
-                clearAttachedFile();
-                return;
-            }
-            
-            attachedFile = file;
-            fileNameDisplay.textContent = file.name;
-            fileStatusAndProgress.classList.remove('hidden');
-            showMessage(`File selected: ${file.name}`);
-        });
-
-        function clearAttachedFile() {
-            attachedFile = null;
-            uploadedFileUrl = null;
-            fileInput.value = '';
-            fileStatusAndProgress.classList.add('hidden');
-            progressBarFill.style.width = '0%';
-        }
-        
-        /**
-         * Simulates a file upload using a promise and setTimeout.
-         * !!! Replace this entire function with your real server-side upload logic !!!
-         */
-        async function uploadFile(file) {
-            console.log(`Starting simulated upload for ${file.name} to ${UPLOAD_ENDPOINT}`);
-            
-            // Show progress bar
-            fileStatusAndProgress.classList.remove('hidden');
-            uploadProgressBar.classList.remove('hidden');
-            progressBarFill.style.width = '0%';
-            sendButton.disabled = true;
-            
-            // --- SIMULATION START ---
-            return new Promise((resolve, reject) => {
-                let progress = 0;
-                const interval = setInterval(() => {
-                    progress += 10;
-                    if (progress >= 100) {
-                        progress = 100;
-                        clearInterval(interval);
-                        
-                        setTimeout(() => {
-                            const uniqueFileName = `${file.name.replace(/[^a-z0-9.]/gi, '_')}-${Date.now()}`;
-                            const finalUrl = CDN_BASE_URL + uniqueFileName;
-                            
-                            sendButton.disabled = false;
-                            showMessage(`Simulated upload complete. URL: ${finalUrl}`);
-                            resolve(finalUrl);
-                        }, 200);
-
-                    }
-                    progressBarFill.style.width = `${progress}%`;
-                }, 100); 
-            });
-            // --- SIMULATION END ---
-        }
-        
-        // --- Chat Messaging Logic ---
-
-        // Sends the message to Firestore and Discord
-        async function sendMessage() {
-            if (!db) {
-                showMessage("Chat service not connected. Please refresh.", true);
-                return;
-            }
-
-            const messageText = messageInput.value.trim();
-            const senderName = senderNameInput.value.trim() || 'Anonymous';
-            
-            // Prevent sending empty message AND no attached file
-            if (messageText === "" && !attachedFile) return;
-
-            // If a file is attached, upload it first
-            if (attachedFile && !uploadedFileUrl) {
-                try {
-                    uploadedFileUrl = await uploadFile(attachedFile);
-                } catch (e) {
-                    console.error("File upload failed:", e);
-                    showMessage('File upload failed: ' + e.message, true);
-                    clearAttachedFile();
-                    return;
-                }
-            }
-            
-            // Public data path uses the dynamically determined currentAppId
-            const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
-            const messagesRef = collection(db, messagesCollectionPath);
-
-            try {
-                // 1. Save to Firestore
-                await setDoc(doc(messagesRef), {
-                    text: messageText,
-                    timestamp: serverTimestamp(),
-                    senderName: senderName,
-                    senderId: userId,
-                    attachmentUrl: uploadedFileUrl 
-                });
-                
-                // 2. Post to Discord (webhook) - Non-blocking
-                postToDiscord(messageText, senderName, uploadedFileUrl);
-
-                // 3. Cleanup
-                messageInput.value = ''; 
-                messageInput.style.height = 'auto';
-                messageInput.focus();
-                clearAttachedFile(); 
-
-            } catch (e) {
-                console.error("Error sending message:", e);
-                showMessage('Failed to send message: ' + e.message, true);
-            }
-        }
-
-        sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // Prevents newline
-                sendMessage();
-            }
-        });
-
-        // Auto-resize textarea
-        messageInput.addEventListener('input', () => {
-            messageInput.style.height = 'auto';
-            messageInput.style.height = messageInput.scrollHeight + 'px';
-        });
-
-        // Creates a media embed/link based on file type
-        function createAttachmentHTML(url) {
-            if (!url) return '';
-            
-            const fileExtension = url.split('.').pop().toLowerCase();
-            let mediaHTML = '';
-            
-            // Simple check for common media types for embedding
-            if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension)) {
-                // Image embed
-                mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
-            } else if (['mp4', 'webm'].includes(fileExtension)) {
-                // Video embed
-                 mediaHTML = `<video src="${url}" controls class="max-w-full h-auto rounded-lg mt-2"></video>`;
-            } else {
-                // General file link (like Discord)
-                mediaHTML = `<a href="${url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline block mt-2 break-words">📎 Attachment: ${url.split('/').pop()}</a>`;
-            }
-
-            return `<div class="bg-gray-800 p-2 rounded-lg border border-gray-700 mt-2">${mediaHTML}</div>`;
-        }
-
-
-        // Creates a message bubble HTML element
-        function createMessageElement(data) {
-            const isSelf = data.senderId === userId;
-            const time = formatTimestamp(data.timestamp);
-            const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
-            
-            const alignment = isSelf ? 'self-end' : 'self-start';
-            const bgColor = isSelf ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-100';
-            const displayName = data.senderName;
-            const nameColor = isSelf ? 'text-indigo-200' : 'text-gray-400';
-
-            const div = document.createElement('div');
-            div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-md ${bgColor} ${alignment}`;
-            div.innerHTML = `
-                <div class="text-sm font-bold mb-1 ${nameColor}">${displayName}</div>
-                <div class="text-base whitespace-pre-wrap break-words">${data.text || ''}</div>
-                ${attachmentHTML}
-                <div class="text-xs mt-1 text-opacity-80 text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}">${time}</div>
-            `;
-            return div;
-        }
-
-        // Listens for real-time messages from Firestore
-        function listenForMessages() {
-            // Public data path uses the dynamically determined currentAppId
-            const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
-            const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
-
-            // Remove the loading status text once listening starts
-            if (loadingStatus) {
-                 loadingStatus.remove();
-            }
-
-            // Set up real-time listener
-            onSnapshot(messagesQuery, (snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    const data = { id: change.doc.id, ...change.doc.data() };
-
-                    if (change.type === "added") {
-                        const newElement = createMessageElement(data);
-                        messagesContainer.appendChild(newElement);
-                        
-                        // Check if the message is NOT from the current user
-                        if (data.senderId !== userId) {
-                            // 1. Send Desktop Notification if window is hidden
-                            sendBrowserNotification(data.senderName, data.text);
-
-                            // 2. Handle Changelog badge update
-                            if (isChangelogOpen) {
-                                newMessageCount++;
-                                updateNotificationBadge();
-                            }
-                        }
-
-                        // Scroll to bottom only if changelog is NOT open
-                        if (!isChangelogOpen) {
-                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                        }
-                    }
-                });
-            }, (error) => {
-                console.error("Error listening to messages:", error);
-                messagesContainer.innerHTML = `<p class="text-red-500 p-4">Failed to load chat history.</p>`;
-            });
-        }
-        
-    </script>
-</body>
-</html>
+    } else {
+        // Fallback for failed initialization
+        codeScreen.innerHTML = '<h1 class="text-3xl font-bold text-red-500">Initialization Error</h1><p class="text-gray-400 mt-4 text-center">Could not connect to Firebase. Check your configuration and network.</p>';
+    }
+});
+</script>
