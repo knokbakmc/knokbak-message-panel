@@ -60,7 +60,7 @@
         <p class="text-gray-400 mb-6 text-center">Please enter the security code to access the school chat panel.</p>
         
         <div id="code-box-content" class="w-full">
-            <input type="text" id="access-code-input" placeholder="Ten-digit code (e.g., 5815287646)" **maxlength="10"** class="w-full p-4 text-center text-2xl tracking-widest border-2 border-indigo-600 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-300 bg-gray-700 text-white mb-4">
+            <input type="text" id="access-code-input" placeholder="Ten-digit code (e.g., 5815287646)" maxlength="10" class="w-full p-4 text-center text-2xl tracking-widest border-2 border-indigo-600 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-300 bg-gray-700 text-white mb-4">
             <button id="enter-code-button" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-semibold hover:bg-indigo-500 transition duration-300 shadow-lg">
                 Access Chat
             </button>
@@ -116,15 +116,16 @@
     <!-- Firebase SDKs and Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // NOTE: signInWithCustomToken is added here for robust authentication
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // =================================
         // 1. CONFIGURATION (EDIT ME)
         // =================================
         
-        // --- Access Codes (Edit this list! Now 10 digits) ---
-         const ACCESS_CODES = [
+        // --- Access Codes (10 digits) ---
+        const ACCESS_CODES = [
             "2879556054",  // David
             "0009029674",  // Camden
             "5815287646",   // Garrett
@@ -135,9 +136,8 @@
         // --- Hardcoded Discord Webhook URL ---
         const DEFAULT_WEBHOOK_URL = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-";
         
-        // --- Placeholder Firebase Config (Fixes Deployment Error) ---
-        // This public-facing config is required for external hosting. 
-        const firebaseConfig = {
+        // --- Placeholder Firebase Config (Fallback for External Hosting) ---
+        const PLACEHOLDER_FIREBASE_CONFIG = {
              apiKey: "AIzaSy_FAKE_KEY", 
              authDomain: "default-app-id.firebaseapp.com",
              projectId: "default-app-id", 
@@ -145,7 +145,7 @@
              messagingSenderId: "123456789012", 
              appId: "1:123456789012:web:abcdef0123456789"
         };
-        const appId = 'public-chat-app'; // Used for Firestore collection pathing
+        const PLACEHOLDER_APP_ID = 'public-chat-app'; 
         // =================================
         
         
@@ -170,7 +170,8 @@
         const chatPanel = document.getElementById('chat-panel');
 
         let db, auth, userId = 'loading';
-        let webhookUrl = DEFAULT_WEBHOOK_URL; // Initialize with default
+        let currentAppId = PLACEHOLDER_APP_ID; // Will be overwritten if running in Canvas
+        let webhookUrl = DEFAULT_WEBHOOK_URL; 
 
         // Set the default webhook into the input field
         webhookUrlInput.value = DEFAULT_WEBHOOK_URL;
@@ -210,7 +211,7 @@
         function startChatTransition() {
             // 1. Start the code box animation
             codeBoxContent.classList.add('code-box-drop-end');
-            codeScreen.style.alignItems = 'flex-start'; // Adjust alignment for animation
+            codeScreen.style.alignItems = 'flex-start'; 
 
             // 2. Hide the main code screen background
             setTimeout(() => {
@@ -253,44 +254,60 @@
             }
         });
 
-        // --- Firebase Initialization and Auth ---
+        // --- Firebase Initialization and Auth (Adaptive Fix) ---
 
-        function initFirebase() {
+        async function initFirebase() {
             try {
-                // Initialize Firebase with the placeholder config (Fixes external deployment issue)
-                const app = initializeApp(firebaseConfig);
+                // Determine configuration based on environment variables availability
+                const isCanvasRuntime = typeof __firebase_config !== 'undefined';
+                let configToUse = PLACEHOLDER_FIREBASE_CONFIG;
+                
+                if (isCanvasRuntime) {
+                    // Use actual Canvas variables if available
+                    configToUse = JSON.parse(__firebase_config);
+                    currentAppId = typeof __app_id !== 'undefined' ? __app_id : PLACEHOLDER_APP_ID;
+                    console.log("Using Canvas runtime Firebase config.");
+                } else {
+                    console.log("Using Placeholder Firebase config.");
+                }
+
+                // 1. Initialize App and Services
+                const app = initializeApp(configToUse);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in anonymously for simple public access
-                signInAnonymously(auth).catch(e => {
-                    console.error("Anonymous sign-in failed:", e);
-                    loadingStatus.textContent = "Error signing in to Firebase. Check console.";
-                    loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
-                });
+                // 2. Handle Authentication: Custom token for Canvas, Anonymous for others
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-                // Authentication state change listener
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Firebase signed in with Custom Token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Firebase signed in Anonymously.");
+                }
+
+                // 3. Set up Auth State Change Listener to start chat features
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
-                        console.log("Firebase initialized. User ID:", userId);
+                        console.log("Firebase initialized. User ID:", userId, "App ID:", currentAppId);
                         showWebhookStatus("Using default hardcoded webhook URL.", false); 
-                        listenForMessages();
+                        listenForMessages(); // Start listening once authenticated
                     } else {
                         console.log("User is signed out or waiting for sign-in.");
                     }
                 });
 
             } catch (error) {
-                console.error("Firebase Initialization Error:", error);
-                loadingStatus.textContent = "Error initializing chat services. Check console for details.";
+                console.error("Firebase Initialization Error (FATAL):", error);
+                loadingStatus.textContent = "Error initializing chat services. Check console for details. (Likely Firewall/CSP block)";
                 loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
             }
         }
 
         // --- Discord Webhook Logic ---
         
-        // This button now only updates the webhookUrl in the current browser session.
         saveWebhookButton.addEventListener('click', async () => {
             const url = webhookUrlInput.value.trim();
             if (!url.startsWith('http') || !url.includes("discord.com/api/webhooks")) {
@@ -313,7 +330,6 @@
             const payload = {
                 content: message,
                 username: senderName,
-                // Using a light-colored avatar for a friendly look
                 avatar_url: "https://placehold.co/100x100/4f46e5/ffffff?text=SC" 
             };
             
@@ -351,8 +367,8 @@
 
             if (messageText === "") return;
             
-            // Public data path
-            const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
+            // Public data path uses the dynamically determined currentAppId
+            const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
             const messagesRef = collection(db, messagesCollectionPath);
 
             try {
@@ -412,7 +428,8 @@
 
         // Listens for real-time messages from Firestore
         function listenForMessages() {
-            const messagesCollectionPath = `/artifacts/${appId}/public/data/messages`;
+            // Public data path uses the dynamically determined currentAppId
+            const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
             const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
 
             // Remove the loading status text once listening starts
