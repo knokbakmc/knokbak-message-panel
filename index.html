@@ -26,6 +26,20 @@
             opacity: 1;
             transition: opacity 1s ease-out;
         }
+
+        /* Changelog Modal Styling */
+        .changelog-modal-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 50;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
     </style>
 </head>
 <body class="bg-gray-800 min-h-screen flex items-center justify-center p-4">
@@ -43,19 +57,58 @@
             <p id="code-error" class="text-red-400 mt-4 text-center opacity-0 transition-opacity duration-300">Invalid code. Please try again.</p>
         </div>
     </div>
+<!-- 2. Main Chat Container (Hidden by Default) -->
+    <div id="chat-panel" class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex-col h-[90vh] transition-all duration-300 hidden opacity-0 relative">
+        
+        <!-- Changelog Modal Background (Hidden by Default) -->
+        <div id="changelog-modal-bg" class="changelog-modal-background">
+            <div id="changelog-modal" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-2xl h-[80%] flex flex-col">
+                <div class="flex justify-between items-center border-b border-gray-700 pb-4 mb-4">
+                    <h2 class="text-3xl font-bold text-indigo-400">Application Changelog</h2>
+                    <button id="close-changelog-button" class="text-gray-400 hover:text-white transition duration-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+                <div id="changelog-content" class="overflow-y-auto text-gray-300 space-y-6 flex-grow p-2">
+                    <!-- Changelog Content goes here -->
+                    <div class="border-l-4 border-indigo-500 pl-4">
+                        <h3 class="text-xl font-semibold text-white mb-1">Version 1.4.0 (Today)</h3>
+                        <ul class="list-disc list-inside space-y-1 ml-4 text-sm">
+                            <li>🔔 **New Feature:** Added Desktop Notifications when the window is not in focus.</li>
+                            <li>⬆️ **Update:** File upload button moved directly next to the message box.</li>
+                            <li>📂 **Feature:** Attachment links/embeds display in chat.</li>
+                        </ul>
+                    </div>
+                    <div class="border-l-4 border-gray-600 pl-4">
+                        <h3 class="text-xl font-semibold text-white mb-1">Version 1.3.0 (Recent)</h3>
+                        <ul class="list-disc list-inside space-y-1 ml-4 text-sm">
+                            <li>✨ **New Feature:** Added this Changelog view.</li>
+                            <li>🛠️ **Fix:** Implemented custom Firebase Configuration for non-Canvas environments.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    <!-- 2. Main Chat Container (Hidden by Default) -->
-    <div id="chat-panel" class="bg-gray-900 shadow-2xl rounded-xl w-full max-w-4xl flex-col h-[90vh] transition-all duration-300 hidden opacity-0">
         <!-- Header -->
         <header class="p-4 border-b border-gray-700 bg-indigo-700 text-white rounded-t-xl flex justify-between items-center">
             <h1 class="text-2xl font-bold">Real-Time School Chat</h1>
-            <button id="config-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Config
-            </button>
+            <div class="flex space-x-2">
+                 <!-- Changelog Button with Notification Badge -->
+                <button id="changelog-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm relative">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    Changelog
+                    <span id="new-message-indicator" class="hidden absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full ring-2 ring-indigo-700">0</span>
+                </button>
+
+                <button id="config-toggle" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition duration-150 shadow-md flex items-center gap-2 text-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.323 1.048.513 1.58.514z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Config
+                </button>
+            </div>
         </header>
 
         <!-- Configuration Modal/Panel (Pre-filled and dark themed) -->
@@ -75,16 +128,38 @@
             <p id="loading-status" class="text-center text-gray-500 p-4 font-semibold">Authenticating and loading chat history...</p>
         </div>
 
-        <!-- Message Input Area -->
+        <!-- Message Input Area (Restructured) -->
         <div class="p-4 border-t border-gray-700 flex flex-col space-y-3">
             <input type="text" id="sender-name" placeholder="Your Display Name (e.g., JaneDoe123)" value="Student-User" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500">
+            
             <div class="flex space-x-2 items-end">
-                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 resize-none overflow-hidden border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500 min-h-[44px]" style="max-height: 200px;"></textarea>
-                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-500 transition duration-200 flex items-center justify-center h-full">
+                <!-- File Selection Button (Now in main row) -->
+                <input type="file" id="file-input" class="hidden" accept="image/*,video/*,application/pdf">
+                <button id="select-file-button" class="bg-gray-700 text-white p-3 rounded-xl font-semibold hover:bg-gray-600 transition duration-200 flex items-center justify-center min-w-[48px] min-h-[48px]">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                </button>
+
+                <textarea id="message-input" rows="1" placeholder="Type your message..." class="flex-grow p-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 resize-none overflow-hidden border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500 min-h-[48px]" style="max-height: 200px;"></textarea>
+                <button id="send-button" class="bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-500 transition duration-200 flex items-center justify-center min-w-[48px] min-h-[48px]">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>
                 </button>
+            </div>
+            
+            <!-- Progress Bar and File Status (outside of the main input row) -->
+            <div id="file-status-and-progress" class="flex flex-col space-y-2 hidden">
+                <!-- File Name and Clear Button -->
+                <span id="file-status" class="text-gray-400 text-sm p-3 rounded-xl bg-gray-700 flex items-center justify-between">
+                    <span id="file-name-display" class="truncate"></span>
+                    <button id="clear-file-button" class="text-red-400 hover:text-red-300 ml-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </span>
+                 <!-- Progress Bar (Hidden by Default) -->
+                <div id="upload-progress-bar" class="w-full bg-gray-700 rounded-full h-2.5">
+                    <div id="progress-bar-fill" class="bg-green-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -92,25 +167,21 @@
     <!-- Firebase SDKs and Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        // NOTE: signInWithCustomToken is added here for robust authentication
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // setLogLevel is added to the getFirestore import line for debugging
         import { getFirestore, collection, doc, setDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // =================================
         // 1. CONFIGURATION (EDIT ME)
         // =================================
         
+        // --- Access Codes (10 digits) ---
         const ACCESS_CODES = [
-            "2879556054",  // David
-            "0009029674",  // Camden
-            "5815287646",   // Garrett
-            "0269927548", // Isaac
-            "7950368985", // Amir
+            "5815287646",  // General Student Access
+            "1122334455",  // Teacher Access Example
+            "9876543210"   // Admin Access Example
         ];
         
         // --- Placeholder Firebase Config (Fallback for External Hosting) ---
-        // *** This has been updated with the configuration you provided ***
         const PLACEHOLDER_FIREBASE_CONFIG = {
              apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
              authDomain: "knokbak-message-panel.firebaseapp.com",
@@ -119,8 +190,15 @@
              messagingSenderId: "424259711684", 
              appId: "1:424259711684:web:6818525d64024815604f91"
         };
-        // Use the project ID for the fallback app identifier
         const PLACEHOLDER_APP_ID = 'knokbak-message-panel'; 
+
+        // --- NEW: File Upload Configuration ---
+        const MAX_FILE_SIZE_MB = 500;
+        // !!! REPLACE THIS WITH YOUR REAL UPLOAD ENDPOINT URL !!!
+        // This is the URL of your Cloudflare Worker or API endpoint.
+        const UPLOAD_ENDPOINT = "YOUR_CLOUDFLARE_WORKER_UPLOAD_ENDPOINT"; 
+        // Base URL for the public file link
+        const CDN_BASE_URL = "https://cdna.knokbak.com/software/share/";
         // =================================
         
         
@@ -144,9 +222,29 @@
         const codeError = document.getElementById('code-error');
         const chatPanel = document.getElementById('chat-panel');
 
+        // Changelog Elements
+        const changelogToggle = document.getElementById('changelog-toggle');
+        const changelogModalBg = document.getElementById('changelog-modal-bg');
+        const closeChangelogButton = document.getElementById('close-changelog-button');
+        const newMessageIndicator = document.getElementById('new-message-indicator');
+        
+        // NEW: File Upload Elements
+        const fileInput = document.getElementById('file-input');
+        const selectFileButton = document.getElementById('select-file-button');
+        const fileStatus = document.getElementById('file-status');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const clearFileButton = document.getElementById('clear-file-button');
+        const fileStatusAndProgress = document.getElementById('file-status-and-progress'); // New container
+        const uploadProgressBar = document.getElementById('upload-progress-bar');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+        
         let db, auth, userId = 'loading';
         let currentAppId = PLACEHOLDER_APP_ID; 
-        let webhookUrl = webhookUrlInput.value; // Get initial value from HTML input
+        let webhookUrl = webhookUrlInput.value;
+        let isChangelogOpen = false;
+        let newMessageCount = 0;
+        let attachedFile = null; // Holds the file object once selected
+        let uploadedFileUrl = null; // Holds the URL after successful upload
 
         // --- Utility Functions ---
 
@@ -177,7 +275,7 @@
             }, 5000);
         }
         
-        // --- Code Entry and Animation Logic (FIXED) ---
+        // --- Code Entry and Animation Logic ---
         
         function startChatTransition() {
             // 1. Setup the animation properties on the code box content
@@ -233,7 +331,7 @@
             }
         });
 
-        // --- Firebase Initialization and Auth (Adaptive Fix with Debugging) ---
+        // --- Firebase Initialization and Auth ---
 
         async function initFirebase() {
             try {
@@ -259,14 +357,13 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // 2. Handle Authentication: Custom token for Canvas, Anonymous for others
+                // 2. Handle Authentication
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                     console.log("Firebase signed in with Custom Token (Canvas).");
                 } else {
-                    // The anonymous sign-in is failing with 'auth/configuration-not-found'
                     await signInAnonymously(auth);
                     console.log("Firebase signed in Anonymously (External).");
                 }
@@ -277,6 +374,7 @@
                         userId = user.uid;
                         console.log("Auth success. User ID:", userId);
                         showWebhookStatus("Using default hardcoded webhook URL.", false); 
+                        requestNotificationPermission(); // Request permission after successful auth
                         listenForMessages(); // Start listening once authenticated
                     } else {
                         console.log("User is signed out or waiting for sign-in.");
@@ -289,6 +387,67 @@
                 loadingStatus.className = "text-center text-red-500 p-4 font-semibold";
             }
         }
+        // --- Changelog/Notification Logic ---
+
+        function updateNotificationBadge() {
+            if (newMessageCount > 0) {
+                newMessageIndicator.textContent = newMessageCount;
+                newMessageIndicator.classList.remove('hidden');
+            } else {
+                newMessageIndicator.classList.add('hidden');
+            }
+        }
+
+        function openChangelog() {
+            isChangelogOpen = true;
+            // Hide the chat panel and show the modal overlay
+            chatPanel.style.display = 'none';
+            changelogModalBg.style.display = 'flex';
+        }
+
+        function closeChangelog() {
+            isChangelogOpen = false;
+            // Hide the modal overlay and show the chat panel
+            changelogModalBg.style.display = 'none';
+            chatPanel.style.display = 'flex';
+            
+            // Reset notifications when returning to chat
+            newMessageCount = 0;
+            updateNotificationBadge();
+        }
+
+        changelogToggle.addEventListener('click', openChangelog);
+        closeChangelogButton.addEventListener('click', closeChangelog);
+
+
+        // --- Browser Notification Logic ---
+
+        function requestNotificationPermission() {
+            if ('Notification' in window) {
+                if (Notification.permission === 'default') {
+                    Notification.requestPermission().then(permission => {
+                        if (permission === 'granted') {
+                             showMessage("Desktop notifications enabled.");
+                        } else if (permission === 'denied') {
+                             console.warn("Desktop notifications denied by user.");
+                        }
+                    });
+                } else if (Notification.permission === 'granted') {
+                    console.log("Desktop notification permission already granted.");
+                }
+            }
+        }
+        
+        function sendBrowserNotification(senderName, messageText) {
+            if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+                const finalMessage = messageText || "Sent an attachment.";
+                new Notification(`New Message from ${senderName}`, {
+                    body: finalMessage.length > 50 ? finalMessage.substring(0, 47) + '...' : finalMessage,
+                    icon: 'https://placehold.co/100x100/4f46e5/ffffff?text=SC' // Simple icon placeholder
+                });
+            }
+        }
+
 
         // --- Discord Webhook Logic ---
         
@@ -306,7 +465,7 @@
         });
 
         // Posts the message to the saved Discord webhook
-        async function postToDiscord(message, senderName) {
+        async function postToDiscord(message, senderName, attachmentUrl = null) {
             if (!webhookUrl || !webhookUrl.includes("discord.com/api/webhooks")) {
                 console.error("Webhook not configured or invalid.");
                 return;
@@ -317,6 +476,10 @@
                 username: senderName,
                 avatar_url: "https://placehold.co/100x100/4f46e5/ffffff?text=SC" 
             };
+
+            if (attachmentUrl) {
+                 payload.content = payload.content.trim() + (payload.content.trim() ? '\n\n' : '') + attachmentUrl;
+            }
             
             try {
                 await fetch(webhookUrl, {
@@ -334,6 +497,78 @@
             configPanel.classList.toggle('hidden');
         });
 
+
+        // --- File Upload Handling ---
+        
+        selectFileButton.addEventListener('click', () => fileInput.click());
+        clearFileButton.addEventListener('click', clearAttachedFile);
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                clearAttachedFile();
+                return;
+            }
+
+            // Check file size limit
+            if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+                showMessage(`File size exceeds the ${MAX_FILE_SIZE_MB}MB limit.`, true);
+                clearAttachedFile();
+                return;
+            }
+            
+            attachedFile = file;
+            fileNameDisplay.textContent = file.name;
+            fileStatusAndProgress.classList.remove('hidden');
+            showMessage(`File selected: ${file.name}`);
+        });
+
+        function clearAttachedFile() {
+            attachedFile = null;
+            uploadedFileUrl = null;
+            fileInput.value = '';
+            fileStatusAndProgress.classList.add('hidden');
+            progressBarFill.style.width = '0%';
+        }
+        
+        /**
+         * Simulates a file upload using a promise and setTimeout.
+         * !!! Replace this entire function with your real server-side upload logic !!!
+         */
+        async function uploadFile(file) {
+            console.log(`Starting simulated upload for ${file.name} to ${UPLOAD_ENDPOINT}`);
+            
+            // Show progress bar
+            fileStatusAndProgress.classList.remove('hidden');
+            uploadProgressBar.classList.remove('hidden');
+            progressBarFill.style.width = '0%';
+            sendButton.disabled = true;
+            
+            // --- SIMULATION START ---
+            return new Promise((resolve, reject) => {
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 10;
+                    if (progress >= 100) {
+                        progress = 100;
+                        clearInterval(interval);
+                        
+                        setTimeout(() => {
+                            const uniqueFileName = `${file.name.replace(/[^a-z0-9.]/gi, '_')}-${Date.now()}`;
+                            const finalUrl = CDN_BASE_URL + uniqueFileName;
+                            
+                            sendButton.disabled = false;
+                            showMessage(`Simulated upload complete. URL: ${finalUrl}`);
+                            resolve(finalUrl);
+                        }, 200);
+
+                    }
+                    progressBarFill.style.width = `${progress}%`;
+                }, 100); 
+            });
+            // --- SIMULATION END ---
+        }
+        
         // --- Chat Messaging Logic ---
 
         // Sends the message to Firestore and Discord
@@ -345,8 +580,21 @@
 
             const messageText = messageInput.value.trim();
             const senderName = senderNameInput.value.trim() || 'Anonymous';
+            
+            // Prevent sending empty message AND no attached file
+            if (messageText === "" && !attachedFile) return;
 
-            if (messageText === "") return;
+            // If a file is attached, upload it first
+            if (attachedFile && !uploadedFileUrl) {
+                try {
+                    uploadedFileUrl = await uploadFile(attachedFile);
+                } catch (e) {
+                    console.error("File upload failed:", e);
+                    showMessage('File upload failed: ' + e.message, true);
+                    clearAttachedFile();
+                    return;
+                }
+            }
             
             // Public data path uses the dynamically determined currentAppId
             const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
@@ -358,15 +606,19 @@
                     text: messageText,
                     timestamp: serverTimestamp(),
                     senderName: senderName,
-                    senderId: userId
+                    senderId: userId,
+                    attachmentUrl: uploadedFileUrl 
                 });
                 
                 // 2. Post to Discord (webhook) - Non-blocking
-                postToDiscord(messageText, senderName);
+                postToDiscord(messageText, senderName, uploadedFileUrl);
 
-                messageInput.value = ''; // Clear input
-                messageInput.style.height = 'auto'; // Reset textarea height
+                // 3. Cleanup
+                messageInput.value = ''; 
+                messageInput.style.height = 'auto';
                 messageInput.focus();
+                clearAttachedFile(); 
+
             } catch (e) {
                 console.error("Error sending message:", e);
                 showMessage('Failed to send message: ' + e.message, true);
@@ -387,10 +639,34 @@
             messageInput.style.height = messageInput.scrollHeight + 'px';
         });
 
+        // Creates a media embed/link based on file type
+        function createAttachmentHTML(url) {
+            if (!url) return '';
+            
+            const fileExtension = url.split('.').pop().toLowerCase();
+            let mediaHTML = '';
+            
+            // Simple check for common media types for embedding
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension)) {
+                // Image embed
+                mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
+            } else if (['mp4', 'webm'].includes(fileExtension)) {
+                // Video embed
+                 mediaHTML = `<video src="${url}" controls class="max-w-full h-auto rounded-lg mt-2"></video>`;
+            } else {
+                // General file link (like Discord)
+                mediaHTML = `<a href="${url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline block mt-2 break-words">📎 Attachment: ${url.split('/').pop()}</a>`;
+            }
+
+            return `<div class="bg-gray-800 p-2 rounded-lg border border-gray-700 mt-2">${mediaHTML}</div>`;
+        }
+
+
         // Creates a message bubble HTML element
         function createMessageElement(data) {
             const isSelf = data.senderId === userId;
             const time = formatTimestamp(data.timestamp);
+            const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
             
             const alignment = isSelf ? 'self-end' : 'self-start';
             const bgColor = isSelf ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-100';
@@ -401,7 +677,8 @@
             div.className = `max-w-xs md:max-w-md p-3 rounded-xl shadow-md ${bgColor} ${alignment}`;
             div.innerHTML = `
                 <div class="text-sm font-bold mb-1 ${nameColor}">${displayName}</div>
-                <div class="text-base whitespace-pre-wrap break-words">${data.text}</div>
+                <div class="text-base whitespace-pre-wrap break-words">${data.text || ''}</div>
+                ${attachmentHTML}
                 <div class="text-xs mt-1 text-opacity-80 text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}">${time}</div>
             `;
             return div;
@@ -427,8 +704,22 @@
                         const newElement = createMessageElement(data);
                         messagesContainer.appendChild(newElement);
                         
-                        // Scroll to bottom when a new message is added
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        // Check if the message is NOT from the current user
+                        if (data.senderId !== userId) {
+                            // 1. Send Desktop Notification if window is hidden
+                            sendBrowserNotification(data.senderName, data.text);
+
+                            // 2. Handle Changelog badge update
+                            if (isChangelogOpen) {
+                                newMessageCount++;
+                                updateNotificationBadge();
+                            }
+                        }
+
+                        // Scroll to bottom only if changelog is NOT open
+                        if (!isChangelogOpen) {
+                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        }
                     }
                 });
             }, (error) => {
