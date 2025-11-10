@@ -6,9 +6,35 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // --- HARDCODED DEFAULT FIREBASE CONFIG ---
+        // This is used if the environment variable is missing. 
+        // You can change these values to point to your own Firebase project.
+        const defaultFirebaseConfig = {
+            apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
+            authDomain: "knokbak-message-panel.firebaseapp.com",
+            projectId: "knokbak-message-panel",
+            storageBucket: "knokbak-message-panel.firebasestorage.app",
+            messagingSenderId: "424259711684",
+            appId: "1:424259711684:web:6818525d64024815604f91",
+        };
+        // -----------------------------------------
+
         // Global Variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        
+        // **Modification Start: Use default config if environment config is missing or invalid**
+        let firebaseConfig;
+        try {
+            const envConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+            const parsedConfig = JSON.parse(envConfig);
+            // Use environment config if it has an API key, otherwise use the default.
+            firebaseConfig = (parsedConfig && parsedConfig.apiKey) ? parsedConfig : defaultFirebaseConfig;
+        } catch (e) {
+            console.warn("Could not parse environment Firebase config. Using default config.");
+            firebaseConfig = defaultFirebaseConfig;
+        }
+        // **Modification End**
+
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         let app;
@@ -26,7 +52,7 @@
         const ADMIN_PASSWORD = "mysubsarethebest";
         const MESSAGES_COLLECTION_PATH = `/artifacts/${appId}/public/data/messages`;
         const USERS_COLLECTION_PATH = `/artifacts/${appId}/public/data/users`;
-        const CODES_COLLECTION_PATH = `/artifacts/${appId}/public/data/codes`; // New collection for code lookup
+        const CODES_COLLECTION_PATH = `/artifacts/${appId}/public/data/codes`; 
         
         // --- Utility Functions ---
 
@@ -43,12 +69,11 @@
 
         async function initFirebase() {
             try {
-                // Check if Firebase config is usable
-                if (!firebaseConfig || Object.keys(firebaseConfig).length === 0 || !firebaseConfig.apiKey) {
-                    document.getElementById('loading-status').textContent = "Initialization failed: Missing Firebase configuration details.";
-                    console.error("Firebase config is missing or incomplete.");
-                    // Keep the user on the code screen if config is missing.
-                    return; 
+                // Check if Firebase config is usable (now checking the selected config)
+                if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('YourDefaultApiKeyGoesHere')) {
+                    document.getElementById('loading-status').textContent = "Initialization: Using Default/Placeholder Firebase config.";
+                } else {
+                     document.getElementById('loading-status').textContent = "Initialization: Using environment-provided Firebase config.";
                 }
                 
                 setLogLevel('error'); // Use 'error' to suppress spammy debug logs
@@ -264,7 +289,6 @@
         }
 
         // --- Message CRUD (Omitted for brevity, assume unchanged) ---
-        // ... (sendMessage, editMessage, deleteMessage remain the same) ...
         
         async function sendMessage(text, imageUrl = null) {
             if (!currentUserId || !currentUserData || text.trim() === '') return;
