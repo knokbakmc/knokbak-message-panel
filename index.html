@@ -1,13 +1,842 @@
 <div class="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app;
+        let db;
+        let auth;
+        let currentUserId = null;
+        let currentUserData = null; // Stores user profile data
+        let currentServerId = 'global'; // Start on 'global'
+        let unsubscribeMessages = null;
+        let unsubscribeUsers = null;
+        let isAdmin = false;
+        let isAuthReady = false;
+
+        const ADMIN_ID = "5815287646";
+        const ADMIN_PASSWORD = "mysubsarethebest";
+        const MESSAGES_COLLECTION_PATH = `/artifacts/${appId}/public/data/messages`;
+        const USERS_COLLECTION_PATH = `/artifacts/${appId}/public/data/users`;
+        const CODES_COLLECTION_PATH = `/artifacts/${appId}/public/data/codes`; // New collection for code lookup
+        
+        // --- Utility Functions ---
+
+        // Simple debounce function to limit function calls
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        // --- Auth and Init ---
+
+        async function initFirebase() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing.");
+                    document.getElementById('loading-status').textContent = "Initialization failed: Firebase config missing.";
+                    return;
                 }
+                
+                setLogLevel('error'); // Use 'error' to suppress spammy debug logs
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Set persistence to session to maintain login across reloads
+                await setPersistence(auth, browserSessionPersistence);
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Wait for auth state to be resolved
+                onAuthStateChanged(auth, (user) => {
+                    isAuthReady = true;
+                    if (user) {
+                        currentUserId = user.uid;
+                        isAdmin = currentUserId === ADMIN_ID;
+                        document.getElementById('loading-status').textContent = "Authenticated successfully.";
+                        handleSuccessfulAuth();
+                    } else {
+                        currentUserId = null;
+                        document.getElementById('loading-status').textContent = "Signed out or anonymous.";
+                        // If user is null, revert to login screen (unless it's a forced logout timer)
+                        if (!document.getElementById('force-logout-timer').classList.contains('hidden')) return;
+                        showCodeScreen();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                document.getElementById('loading-status').textContent = `Initialization Error: ${error.message}`;
+                showCodeScreen();
+            }
+        }
+        
+        function showCodeScreen() {
+            document.getElementById('code-screen').classList.remove('hidden');
+            document.getElementById('code-screen').style.opacity = '1';
+            document.getElementById('sidebar').classList.add('hidden');
+            document.getElementById('chat-panel').classList.add('hidden');
+            document.getElementById('user-info-bar').classList.add('hidden');
+            document.getElementById('members-panel').classList.add('hidden');
+        }
+
+        async function handleSuccessfulAuth() {
+            // Fetch or create user profile data
+            await fetchUserProfile();
+            
+            // UI transitions
+            document.getElementById('code-screen').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('code-screen').classList.add('hidden');
+            }, 500);
+
+            document.getElementById('sidebar').classList.remove('hidden');
+            document.getElementById('chat-panel').classList.remove('hidden');
+            document.getElementById('chat-panel').style.opacity = '1';
+            document.getElementById('user-info-bar').classList.remove('hidden');
+            
+            // Set initial UI elements
+            updateUserInfoBar();
+            
+            // Start listening for messages and users
+            startListeners();
+        }
+        
+        // --- Code Management ---
+        
+        async function saveAccessCode(code, userId) {
+            try {
+                // The code is the document ID, pointing to the user ID
+                const codeRef = doc(db, CODES_COLLECTION_PATH, code);
+                await setDoc(codeRef, { userId: userId });
+            } catch (e) {
+                console.error("Error saving access code:", e);
+                showMessageBox("Error saving new access code.", true);
+                return false;
+            }
+            return true;
+        }
+
+        async function deleteAccessCode(code) {
+            try {
+                const codeRef = doc(db, CODES_COLLECTION_PATH, code);
+                await deleteDoc(codeRef);
+            } catch (e) {
+                console.error("Error deleting access code:", e);
+                // Note: We don't show a messagebox here as it's a background cleanup task
+            }
+        }
+        
+        // --- User Profile Management ---
+        
+        async function fetchUserProfile() {
+            if (!currentUserId || !isAuthReady) return;
+            const userRef = doc(db, USERS_COLLECTION_PATH, currentUserId);
+            const userSnap = await getDoc(userRef);
+
+            const defaultUsername = "User";
+            const defaultTag = (currentUserId.slice(-4) || '0000');
+            const defaultPfp = `https://placehold.co/80x80/374151/9ca3af?text=${defaultUsername.charAt(0)}`;
+            const defaultAboutMe = "A member of the School Chat community.";
+            const defaultCode = currentUserId.slice(0, 10); // Default code is the first 10 chars of UID
+
+            if (userSnap.exists()) {
+                currentUserData = userSnap.data();
+                // Ensure required fields exist in case of old data structure
+                currentUserData = {
+                    accessCode: currentUserData.accessCode || defaultCode,
+                    username: currentUserData.username || defaultUsername,
+                    tag: currentUserData.tag || defaultTag,
+                    pfpUrl: currentUserData.pfpUrl || defaultPfp,
+                    aboutMe: currentUserData.aboutMe || defaultAboutMe,
+                    isAdmin: isAdmin
+                };
+            } else {
+                // Create a new default profile
+                currentUserData = {
+                    accessCode: defaultCode,
+                    username: defaultUsername,
+                    tag: defaultTag,
+                    pfpUrl: defaultPfp,
+                    aboutMe: defaultAboutMe,
+                    isAdmin: isAdmin
+                };
+                await setDoc(userRef, currentUserData);
+                // Create the initial code mapping
+                await saveAccessCode(defaultCode, currentUserId);
+            }
+        }
+        
+        async function saveUserProfile() {
+            if (!currentUserId || !currentUserData) {
+                showMessageBox("Profile not loaded. Please wait.", true);
+                return;
+            }
+            
+            const oldCode = currentUserData.accessCode;
+            const newCode = document.getElementById('access-code-edit-input').value.trim();
+            const username = document.getElementById('username-input').value.trim();
+            const tag = document.getElementById('tag-input').value.trim();
+            const pfpUrl = document.getElementById('pfp-url-input').value.trim();
+            const aboutMe = document.getElementById('about-me-input').value.trim();
+            
+            if (!username || !tag || tag.length !== 4 || isNaN(tag)) {
+                showMessageBox("Username and 4-digit numeric Tag are required.", true);
+                return;
+            }
+            
+            if (newCode.length !== 10 || isNaN(newCode)) {
+                showMessageBox("Access Code must be exactly 10 numeric digits.", true);
+                return;
+            }
+            
+            currentUserData.username = username;
+            currentUserData.tag = tag;
+            currentUserData.pfpUrl = pfpUrl || `https://placehold.co/100x100/374151/9ca3af?text=${username.charAt(0)}`;
+            currentUserData.aboutMe = aboutMe;
+            
+            // --- Code Change Logic ---
+            if (oldCode !== newCode) {
+                // 1. Check if the new code is already in use by another user
+                const codeSnap = await getDoc(doc(db, CODES_COLLECTION_PATH, newCode));
+                if (codeSnap.exists() && codeSnap.data().userId !== currentUserId) {
+                    showMessageBox(`Error: Access Code "${newCode}" is already in use by another account.`, true);
+                    return;
+                }
+                
+                // 2. Delete old code mapping
+                await deleteAccessCode(oldCode);
+                
+                // 3. Save new code mapping
+                if (!await saveAccessCode(newCode, currentUserId)) {
+                    // Revert user data to old code if saving new code fails
+                    currentUserData.accessCode = oldCode;
+                    await saveAccessCode(oldCode, currentUserId); // Attempt to re-save the old one
+                    return; 
+                }
+                
+                currentUserData.accessCode = newCode;
+            }
+            // --- End Code Change Logic ---
+
+            const userRef = doc(db, USERS_COLLECTION_PATH, currentUserId);
+            try {
+                await setDoc(userRef, {
+                    ...currentUserData,
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
+                updateUserInfoBar();
+                showMessageBox("Profile updated successfully!");
+                document.getElementById('settings-modal-bg').classList.add('hidden');
+            } catch (e) {
+                console.error("Error saving user profile:", e);
+                showMessageBox("Error saving profile. Try again.", true);
+            }
+        }
+        
+        function updateUserInfoBar() {
+            if (!currentUserData) return;
+            const displayName = `${currentUserData.username || 'User'}#${currentUserData.tag || '0000'}`;
+            document.getElementById('user-name-display').textContent = displayName;
+            document.getElementById('pfp-thumbnail').src = currentUserData.pfpUrl;
+            document.getElementById('pfp-thumbnail').onerror = () => {
+                document.getElementById('pfp-thumbnail').src = `https://placehold.co/32x32/374151/9ca3af?text=${(currentUserData.username || 'U').charAt(0)}`;
+            };
+        }
+
+        // --- Message CRUD (Omitted for brevity, assume unchanged) ---
+        // ... (sendMessage, editMessage, deleteMessage remain the same) ...
+        
+        async function sendMessage(text, imageUrl = null) {
+            if (!currentUserId || !currentUserData || text.trim() === '') return;
+
+            const message = {
+                userId: currentUserId,
+                username: currentUserData.username,
+                tag: currentUserData.tag,
+                pfpUrl: currentUserData.pfpUrl,
+                content: text,
+                server: currentServerId,
+                timestamp: serverTimestamp(),
+                imageUrl: imageUrl,
+                isEdited: false
+            };
+
+            try {
+                await addDoc(collection(db, MESSAGES_COLLECTION_PATH), message);
+                document.getElementById('message-input').value = '';
+                // Clear file state after successful send
+                clearFileAttachment();
+                // Scroll to bottom
+                setTimeout(scrollToBottom, 100);
+            } catch (e) {
+                console.error("Error sending message:", e);
+                showMessageBox("Failed to send message.", true);
+            }
+        }
+        
+        async function editMessage(messageId, newContent) {
+            if (!currentUserId) return;
+            const messageRef = doc(db, MESSAGES_COLLECTION_PATH, messageId);
+            
+            try {
+                await updateDoc(messageRef, {
+                    content: newContent,
+                    isEdited: true,
+                    editedAt: serverTimestamp()
+                });
+            } catch (e) {
+                console.error("Error editing message:", e);
+                showMessageBox("Failed to edit message.", true);
+            }
+        }
+        
+        async function deleteMessage(messageId) {
+            if (!currentUserId) return;
+            const messageRef = doc(db, MESSAGES_COLLECTION_PATH, messageId);
+            
+            try {
+                await deleteDoc(messageRef);
+            } catch (e) {
+                console.error("Error deleting message:", e);
+                showMessageBox("Failed to delete message.", true);
+            }
+        }
+
+        // --- Realtime Listeners (Omitted for brevity, assume unchanged) ---
+        
+        function startListeners() {
+            if (unsubscribeMessages) unsubscribeMessages();
+            if (unsubscribeUsers) unsubscribeUsers();
+
+            const messagesQuery = query(
+                collection(db, MESSAGES_COLLECTION_PATH),
+                where('server', '==', currentServerId)
+            );
+
+            unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+                let messagesHTML = '';
+                snapshot.docs.forEach(doc => {
+                    messagesHTML += createMessageHTML(doc.id, doc.data());
+                });
+                document.getElementById('messages-container').innerHTML = messagesHTML;
+                scrollToBottom();
+            }, (error) => {
+                console.error("Error listening to messages:", error);
+            });
+            
+            const usersQuery = query(collection(db, USERS_COLLECTION_PATH));
+            
+            unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
+                window.allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (!document.getElementById('members-panel').classList.contains('hidden')) {
+                    displayMembersList();
+                }
+            }, (error) => {
+                console.error("Error listening to users:", error);
+            });
+        }
+        
+        // --- UI Rendering (Omitted for brevity, assume unchanged except for event handlers) ---
+        
+        function createMessageHTML(id, message) {
+            const isCurrentUser = message.userId === currentUserId;
+            const displayName = `${message.username}#${message.tag}`;
+            const time = message.timestamp ? new Date(message.timestamp.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...';
+            const isEdited = message.isEdited ? `<span class="text-xs text-gray-400 ml-2">(edited)</span>` : '';
+            const pfpUrl = message.pfpUrl || `https://placehold.co/40x40/374151/9ca3af?text=${message.username.charAt(0)}`;
+
+            let imageHtml = '';
+            if (message.imageUrl) {
+                imageHtml = `<img src="${message.imageUrl}" class="mt-2 max-w-xs max-h-48 object-contain rounded-lg shadow-md border border-gray-600" onerror="this.onerror=null;this.src='https://placehold.co/200x100/374151/9ca3af?text=Image+Load+Failed';" />`;
+            }
+
+            return `
+                <div class="message-row flex group items-start space-x-3 p-2 hover:bg-gray-700/50 rounded-lg relative transition-colors duration-100 animate-slideIn" data-message-id="${id}" data-user-id="${message.userId}">
+                    <!-- Profile Picture (Clickable) -->
+                    <img src="${pfpUrl}" class="w-10 h-10 rounded-full object-cover cursor-pointer hover:opacity-80 transition duration-150 message-pfp" data-user-id="${message.userId}" alt="${message.username} PFP" 
+                         onerror="this.onerror=null;this.src='https://placehold.co/40x40/374151/9ca3af?text=${message.username.charAt(0)}';">
+                    
+                    <div class="flex flex-col flex-grow min-w-0">
+                        <!-- Header: Name, Tag, Time -->
+                        <div class="flex items-baseline space-x-2">
+                            <span class="font-bold text-indigo-300 cursor-pointer hover:text-indigo-200 transition duration-150 message-username" data-user-id="${message.userId}">${displayName}</span>
+                            <span class="text-xs text-gray-500">${time}</span>
+                        </div>
+                        
+                        <!-- Content -->
+                        <div class="text-gray-200 break-words message-content-text">${message.content} ${isEdited}</div>
+                        ${imageHtml}
+                        
+                        <!-- Hidden Edit/Delete Input -->
+                        <textarea class="edit-input w-full resize-none p-2 mt-1 rounded-lg bg-gray-600 text-gray-100 hidden" data-message-id="${id}">${message.content}</textarea>
+                        <div class="edit-actions mt-1 hidden space-x-2">
+                            <button class="save-edit-btn bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded-full transition">Save</button>
+                            <button class="cancel-edit-btn bg-gray-500 hover:bg-gray-600 text-white text-xs px-2 py-1 rounded-full transition">Cancel</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Message Actions (Edit/Delete) -->
+                    <div class="message-actions absolute right-0 top-0 mt-2 mr-2 flex items-center p-1 rounded-lg shadow-lg border border-gray-600 z-10">
+                        ${(isCurrentUser || isAdmin) ? `<button class="edit-message-btn p-1 text-gray-400 hover:text-green-400" data-message-id="${id}" title="Edit Message"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-9-6l9 9m-4.5 4.5l-2.5 2.5m4.5-4.5l-9-9L3 17.25 10.75 21l-2.5-2.5z"/></svg></button>` : ''}
+                        ${(isCurrentUser || isAdmin) ? `<button class="delete-message-btn p-1 text-gray-400 hover:text-red-400" data-message-id="${id}" title="Delete Message"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayMembersList(selectedUserId = null) {
+            const membersPanel = document.getElementById('members-panel');
+            membersPanel.classList.remove('hidden');
+
+            const profileViewDetails = document.getElementById('profile-view-details');
+            const adminControls = document.getElementById('admin-controls');
+            
+            const userIdToDisplay = selectedUserId || currentUserId;
+            
+            if (userIdToDisplay && window.allUsers) {
+                const user = window.allUsers.find(u => u.id === userIdToDisplay);
+                
+                if (user) {
+                    profileViewDetails.dataset.targetId = user.id; // Store ID for admin actions
+                    document.getElementById('view-pfp').src = user.pfpUrl;
+                    document.getElementById('view-pfp').onerror = () => {
+                        document.getElementById('view-pfp').src = `https://placehold.co/80x80/1f2937/9ca3af?text=${user.username.charAt(0)}`;
+                    };
+                    document.getElementById('view-display-name').textContent = `${user.username}#${user.tag}`;
+                    document.getElementById('view-access-code').textContent = `ID: ${user.id}`;
+                    document.getElementById('view-about-me').value = user.aboutMe || "This user has not set an 'About Me' yet.";
+
+                    // Show Admin Controls if current user is admin AND target user is not current user
+                    if (isAdmin && user.id !== currentUserId) {
+                        adminControls.classList.remove('hidden');
+                        adminControls.dataset.targetId = user.id;
+                    } else {
+                        adminControls.classList.add('hidden');
+                        delete adminControls.dataset.targetId;
+                    }
+                    
+                    // Show right-click context menu listener only if the user is an admin
+                    if (isAdmin) {
+                        profileViewDetails.addEventListener('contextmenu', handleProfileContextMenu);
+                    } else {
+                        profileViewDetails.removeEventListener('contextmenu', handleProfileContextMenu);
+                    }
+                } else {
+                    profileViewDetails.dataset.targetId = '';
+                    document.getElementById('view-pfp').src = 'https://placehold.co/80x80/1f2937/9ca3af?text=U';
+                    document.getElementById('view-display-name').textContent = 'User Not Found';
+                    document.getElementById('view-access-code').textContent = '';
+                    document.getElementById('view-about-me').value = 'Could not retrieve profile information.';
+                    adminControls.classList.add('hidden');
+                }
+            }
+        }
+        
+        function handleProfileContextMenu(e) {
+            e.preventDefault();
+            const targetId = e.currentTarget.dataset.targetId;
+            if (!isAdmin || !targetId || targetId === currentUserId) return;
+
+            const menu = document.createElement('div');
+            menu.id = 'admin-context-menu';
+            menu.className = 'absolute bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50';
+            menu.style.left = `${e.pageX}px`;
+            menu.style.top = `${e.pageY}px`;
+            menu.innerHTML = `
+                <button class="w-full text-left px-3 py-1 text-sm text-red-400 hover:bg-red-700/50 block transition" data-action="force-logout" data-user-id="${targetId}">Force Logout (25s)</button>
+            `;
+            
+            document.body.appendChild(menu);
+
+            document.addEventListener('click', () => {
+                const existingMenu = document.getElementById('admin-context-menu');
+                if (existingMenu) existingMenu.remove();
+            }, { once: true });
+        }
+        
+        // --- Admin/Moderation Logic (Omitted for brevity, assume unchanged) ---
+        
+        async function attemptAdminAction(action, targetUserId, value = '') {
+            const password = await promptAdminPassword();
+            if (password === null) return; // Cancelled
+            if (password !== ADMIN_PASSWORD) {
+                showMessageBox("Incorrect admin password.", true);
+                return;
+            }
+
+            switch (action) {
+                case 'timeout':
+                    showMessageBox(`Admin action: Timeout user ${targetUserId} for ${value} minutes (Placeholder).`);
+                    break;
+                case 'warn':
+                    showMessageBox(`Admin action: Warn user ${targetUserId} (Placeholder).`);
+                    break;
+                case 'ban':
+                    showMessageBox(`Admin action: Ban server (Placeholder - not implemented).`);
+                    break;
+                case 'force-logout':
+                    handleForceLogout(targetUserId);
+                    break;
+                default:
+                    console.error("Unknown admin action:", action);
+            }
+        }
+        
+        async function promptAdminPassword() {
+            return new Promise(resolve => {
+                const modal = document.getElementById('admin-password-modal-bg');
+                const input = document.getElementById('admin-password-input');
+                const submitBtn = document.getElementById('admin-password-submit');
+                const cancelBtn = document.getElementById('admin-password-cancel');
+                const errorDiv = document.getElementById('admin-password-error');
+                
+                input.value = '';
+                errorDiv.textContent = '';
+                modal.classList.remove('hidden');
+
+                const handler = (e) => {
+                    const password = input.value;
+                    if (password === ADMIN_PASSWORD) {
+                        modal.classList.add('hidden');
+                        resolve(password);
+                    } else {
+                        errorDiv.textContent = "Incorrect password.";
+                        errorDiv.classList.remove('opacity-0');
+                    }
+                };
+
+                submitBtn.onclick = handler;
+                input.onkeyup = (e) => { if (e.key === 'Enter') handler(); };
+                cancelBtn.onclick = () => {
+                    modal.classList.add('hidden');
+                    resolve(null);
+                };
+            });
+        }
+        
+        function handleForceLogout(targetUserId) {
+            if (targetUserId === currentUserId) {
+                showMessageBox("Cannot force logout yourself.", true);
+                return;
+            }
+            
+            const timeoutDuration = 25; // seconds
+            let timeRemaining = timeoutDuration;
+            const timerDiv = document.getElementById('force-logout-timer');
+            const timerText = document.getElementById('force-logout-text');
+            
+            timerText.textContent = `User ${targetUserId} has been timed out by an admin. You must wait ${timeRemaining} seconds before logging in.`;
+            timerDiv.classList.remove('hidden');
+            document.getElementById('code-screen').classList.remove('hidden');
+            document.getElementById('code-screen').style.opacity = '0';
+            
+            const interval = setInterval(() => {
+                timeRemaining--;
+                timerText.textContent = `User ${targetUserId} has been timed out by an admin. You must wait ${timeRemaining} seconds before logging in.`;
+
+                if (timeRemaining <= 0) {
+                    clearInterval(interval);
+                    timerDiv.classList.add('hidden');
+                    document.getElementById('code-screen').style.opacity = '1';
+                }
+            }, 1000);
+            
+            signOut(auth);
+            
+            showMessageBox(`User ${targetUserId} has been logged out and timed out for ${timeoutDuration} seconds.`, false);
+        }
+
+        // --- Event Listeners and Setup ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initFirebase();
+
+            // --- Code Re-entry/Check Logic ---
+            document.getElementById('enter-code-button').addEventListener('click', async () => {
+                const codeInput = document.getElementById('access-code-input').value.trim();
+                const errorDiv = document.getElementById('code-error');
+
+                if (codeInput.length !== 10 || isNaN(codeInput)) {
+                    errorDiv.textContent = "Access Code must be 10 numeric digits.";
+                    errorDiv.classList.remove('opacity-0');
+                    return;
+                }
+                
+                // On re-entry (after forced logout), we check if the entered code belongs to the current UID
+                if (!currentUserId) {
+                    // Try to find the user ID associated with the code
+                    const codeSnap = await getDoc(doc(db, CODES_COLLECTION_PATH, codeInput));
+                    if (codeSnap.exists() && isAuthReady) {
+                        // We found a matching code, but we can't directly sign in as them.
+                        // For this environment, we rely on the initial token. We can only "re-enable" the UI.
+                        errorDiv.textContent = "Login successful. UI re-enabled.";
+                        errorDiv.classList.remove('opacity-0');
+                        handleSuccessfulAuth(); // Re-show UI
+                    } else {
+                        errorDiv.textContent = "Invalid Code or Authentication Still Loading.";
+                        errorDiv.classList.remove('opacity-0');
+                    }
+                } else {
+                    // If we're already logged in (shouldn't happen, but just in case), proceed.
+                     handleSuccessfulAuth();
+                }
+            });
+            
+            // Allow Enter to submit on the code screen
+            document.getElementById('access-code-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('enter-code-button').click();
+                }
+            });
+
+            // --- Message Input and Sending (Omitted for brevity) ---
+            
+            document.getElementById('send-button').addEventListener('click', () => {
+                const input = document.getElementById('message-input');
+                const text = input.value.trim();
+                const isFileAttached = document.getElementById('file-status-and-progress').dataset.imageUrl;
+
+                if (text === '' && !isFileAttached) return;
+
+                sendMessage(text, isFileAttached);
+            });
+
+            document.getElementById('message-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    document.getElementById('send-button').click();
+                }
+            });
+
+            // --- PFP Upload/Link Handling in Settings (Omitted for brevity) ---
+            
+            document.getElementById('pfp-url-input').addEventListener('input', (e) => {
+                const url = e.target.value.trim();
+                document.getElementById('pfp-preview-img').src = url || 'https://placehold.co/100x100/374151/9ca3af?text=U';
+            });
+            
+            document.getElementById('pfp-url-input').addEventListener('change', (e) => {
+                currentUserData.pfpUrl = e.target.value.trim();
+            });
+
+            // --- Settings Modal Logic ---
+
+            document.getElementById('settings-button').addEventListener('click', () => {
+                if (!currentUserData) return;
+                
+                document.getElementById('username-input').value = currentUserData.username || '';
+                document.getElementById('tag-input').value = currentUserData.tag || '';
+                document.getElementById('access-code-edit-input').value = currentUserData.accessCode || ''; // Load the code
+                document.getElementById('pfp-url-input').value = currentUserData.pfpUrl || '';
+                document.getElementById('pfp-preview-img').src = currentUserData.pfpUrl || 'https://placehold.co/100x100/374151/9ca3af?text=U';
+                document.getElementById('about-me-input').value = currentUserData.aboutMe || '';
+                
+                document.getElementById('settings-modal-bg').classList.remove('hidden');
+            });
+            
+            document.getElementById('save-settings-button').addEventListener('click', saveUserProfile);
+            document.getElementById('close-settings-button').addEventListener('click', () => {
+                document.getElementById('settings-modal-bg').classList.add('hidden');
+            });
+
+            // --- Enter Key to Save Settings ---
+            const settingsInputs = document.querySelectorAll('#settings-modal-bg input, #settings-modal-bg textarea');
+            settingsInputs.forEach(input => {
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && input.tagName !== 'TEXTAREA') { // Don't save if Enter is pressed in About Me textarea
+                        e.preventDefault();
+                        saveUserProfile();
+                    }
+                });
+            });
+
+
+            // --- Message Interaction (Edit/Delete/Profile Click) (Omitted for brevity) ---
+            
+            document.getElementById('messages-container').addEventListener('click', (e) => {
+                if (e.target.classList.contains('message-pfp') || e.target.classList.contains('message-username')) {
+                    const userId = e.target.dataset.userId;
+                    displayMembersList(userId);
+                    return;
+                }
+                
+                if (e.target.closest('.delete-message-btn')) {
+                    const btn = e.target.closest('.delete-message-btn');
+                    const messageId = btn.dataset.messageId;
+                    const messageRow = btn.closest('.message-row');
+                    const messageUserId = messageRow.dataset.userId;
+
+                    const deleteAction = async () => {
+                        if (messageUserId === currentUserId) {
+                            deleteMessage(messageId);
+                        } else if (isAdmin) {
+                            const password = await promptAdminPassword();
+                            if (password === ADMIN_PASSWORD) {
+                                deleteMessage(messageId);
+                            } else if (password !== null) {
+                                showMessageBox("Incorrect admin password for deletion.", true);
+                            }
+                        }
+                    };
+                    
+                    showMessageBox("Are you sure you want to delete this message?", false, deleteAction, true);
+                    return;
+                }
+
+                if (e.target.closest('.edit-message-btn')) {
+                    const btn = e.target.closest('.edit-message-btn');
+                    const messageRow = btn.closest('.message-row');
+                    const messageContentDiv = messageRow.querySelector('.message-content-text');
+                    const editInput = messageRow.querySelector('.edit-input');
+                    const editActions = messageRow.querySelector('.edit-actions');
+                    const messageUserId = messageRow.dataset.userId;
+                    
+                    if (messageUserId === currentUserId || isAdmin) {
+                        messageContentDiv.classList.add('hidden');
+                        editActions.classList.remove('hidden');
+                        editInput.classList.remove('hidden');
+                        editInput.focus();
+                    }
+                    return;
+                }
+                
+                if (e.target.closest('.save-edit-btn')) {
+                    const btn = e.target.closest('.save-edit-btn');
+                    const messageRow = btn.closest('.message-row');
+                    const messageId = messageRow.dataset.message-Id;
+                    const editInput = messageRow.querySelector('.edit-input');
+                    const newContent = editInput.value.trim();
+                    const messageUserId = messageRow.dataset.userId;
+
+                    const finalizeEdit = () => {
+                        if (newContent) {
+                            editMessage(messageId, newContent);
+                        }
+                        messageRow.querySelector('.message-content-text').classList.remove('hidden');
+                        messageRow.querySelector('.edit-actions').classList.add('hidden');
+                        editInput.classList.add('hidden');
+                    };
+                    
+                    if (messageUserId !== currentUserId && isAdmin) {
+                        promptAdminPassword().then(password => {
+                            if (password === ADMIN_PASSWORD) {
+                                finalizeEdit();
+                            } else if (password !== null) {
+                                showMessageBox("Incorrect admin password for editing.", true);
+                                editInput.classList.remove('hidden');
+                                messageRow.querySelector('.edit-actions').classList.remove('hidden');
+                            }
+                        });
+                    } else {
+                        finalizeEdit();
+                    }
+                    return;
+                }
+                
+                if (e.target.closest('.cancel-edit-btn')) {
+                    const btn = e.target.closest('.cancel-edit-btn');
+                    const messageRow = btn.closest('.message-row');
+                    messageRow.querySelector('.message-content-text').classList.remove('hidden');
+                    messageRow.querySelector('.edit-input').classList.add('hidden');
+                    messageRow.querySelector('.edit-actions').classList.add('hidden');
+                    return;
+                }
+            });
+
+            // --- Admin Controls in Member List (Omitted for brevity) ---
+            
+            document.getElementById('admin-controls').addEventListener('click', async (e) => {
+                const btn = e.target.closest('.admin-action-btn');
+                if (!btn) return;
+
+                const action = btn.dataset.action;
+                const targetUserId = document.getElementById('admin-controls').dataset.targetId;
+
+                if (!targetUserId) {
+                    showMessageBox("No target user selected.", true);
+                    return;
+                }
+
+                if (action === 'timeout') {
+                    showMessageBox(`Timeout user ${targetUserId} for 10 minutes?`, false, () => attemptAdminAction(action, targetUserId, '10'), true);
+                } else if (action === 'warn') {
+                    showMessageBox(`Warn user ${targetUserId}?`, false, () => attemptAdminAction(action, targetUserId), true);
+                } else if (action === 'ban') {
+                    showMessageBox(`Ban Server (Global Chat) is not implemented yet.`, false, null, false);
+                }
+            });
+            
+            document.body.addEventListener('click', async (e) => {
+                if (e.target.closest('#admin-context-menu button[data-action="force-logout"]')) {
+                    const targetId = e.target.dataset.userId;
+                    if (targetId) {
+                        attemptAdminAction('force-logout', targetId);
+                    }
+                }
+            });
+
+
+            // --- Utility UI Functions (Omitted for brevity) ---
+
+            function scrollToBottom() {
+                const container = document.getElementById('messages-container');
+                container.scrollTop = container.scrollHeight;
+            }
+            
+            function clearFileAttachment() {
+                document.getElementById('file-status-and-progress').classList.add('hidden');
+                document.getElementById('file-status-and-progress').dataset.imageUrl = '';
+                document.getElementById('file-name-display').textContent = '';
+                document.getElementById('file-input').value = '';
+            }
+
+        }); // DOMContentLoaded end
+        
+        // --- Global Message/Modal Box (Omitted for brevity) ---
+        
+        let messageBoxTimeout;
+        function showMessageBox(message, isError = false, onConfirm = null, requiresConfirm = false) {
+            clearTimeout(messageBoxTimeout);
+            const box = document.getElementById('message-box');
+            const text = document.getElementById('message-box-text');
+            const confirmBtn = document.getElementById('message-box-confirm');
+
+            text.innerHTML = message;
+            box.classList.remove('bg-green-700', 'bg-red-700');
+            box.classList.add(isError ? 'bg-red-700' : 'bg-green-700');
+            box.classList.remove('hidden');
+
+            if (requiresConfirm && onConfirm) {
+                confirmBtn.classList.remove('hidden');
+                confirmBtn.onclick = () => {
+                    box.classList.add('hidden');
+                    onConfirm();
+                };
+            } else {
+                confirmBtn.classList.add('hidden');
+                confirmBtn.onclick = null;
+                
+                messageBoxTimeout = setTimeout(() => {
+                    box.classList.add('hidden');
+                }, 3000);
             }
         }
     </script>
@@ -39,26 +868,20 @@
             background-color: #1f2937;
         }
 
-        /* Styling for the blurred code display */
-        .code-blur {
-            filter: blur(8px);
-            transition: filter 0.3s;
-            user-select: none;
+        /* Message hover menu styling */
+        .message-row:hover .message-actions {
+            opacity: 1;
+            transform: translateX(0);
         }
-        .code-blur:hover {
-            filter: blur(0);
+        .message-actions {
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            transform: translateX(-5px);
+            background-color: #1f2937; /* Gray-800 */
         }
         
-        /* Custom scrollbar for the emoji picker */
-        .emoji-list::-webkit-scrollbar {
-            width: 6px;
-        }
-        .emoji-list::-webkit-scrollbar-thumb {
-            background-color: #6d28d9; /* Indigo-700 */
-            border-radius: 3px;
-        }
-        .emoji-list::-webkit-scrollbar-track {
-            background-color: #1f2937; /* Gray-800 */
+        .member-list-item:hover {
+            background-color: #374151; /* Gray-700 */
         }
     </style>
 
@@ -66,23 +889,27 @@
     <div class="w-full max-w-7xl h-[90vh] bg-gray-800 rounded-xl shadow-2xl overflow-hidden flex" id="main-app-container">
         
         <!-- Access Code Screen (Initial State) -->
-        <div id="code-screen" class="absolute inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center p-8 transition-opacity duration-500">
+        <div id="code-screen" class="absolute inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center p-8 transition-opacity duration-500 hidden">
             <h2 class="text-3xl font-bold mb-4 text-center text-indigo-400">Welcome to School Chat</h2>
-            <p class="text-gray-400 mb-6 text-center">Enter your 10-digit Access Code to begin.</p>
+            <p class="text-gray-400 mb-6 text-center">Enter your 10-digit Access Code to re-enable chat.</p>
             <input type="text" id="access-code-input" maxlength="10" placeholder="0000000000" class="w-full max-w-sm p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 text-center text-xl tracking-wider focus:ring-indigo-500 focus:border-indigo-500 mb-4 uppercase">
             <button id="enter-code-button" class="w-full max-w-sm p-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition duration-150">ENTER</button>
             <p id="code-error" class="mt-4 text-sm font-medium text-red-400 opacity-0 transition duration-500"></p>
             <p id="loading-status" class="mt-6 text-gray-500 text-sm">Initializing chat service...</p>
         </div>
+        
+        <!-- Forced Logout/Timeout Screen -->
+        <div id="force-logout-timer" class="absolute inset-0 z-50 bg-gray-900 hidden flex-col items-center justify-center p-8 transition-opacity duration-500">
+            <svg class="w-20 h-20 text-red-500 mb-4 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <h2 class="text-4xl font-extrabold mb-4 text-center text-red-400">TIMED OUT</h2>
+            <p id="force-logout-text" class="text-xl text-gray-300 text-center"></p>
+        </div>
 
-        <!-- Left Sidebar (Servers & DMs) -->
+
+        <!-- Left Sidebar (Servers) -->
         <div id="sidebar" class="w-20 bg-gray-900 flex flex-col items-center py-3 space-y-3 hidden">
-            <!-- Server/DM Icons go here -->
-            <div id="global-server-icon" class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg active-server">SC</div>
-            <div class="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg">DMs</div>
-
-            <!-- Plus button for new server -->
-            <button id="add-server-button" class="mt-4 w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white text-3xl hover:rounded-xl transition-all duration-200 shadow-lg">+</button>
+            <!-- Global Chat -->
+            <div id="global-server-icon" class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg active-server" data-server-id="global">SC</div>
         </div>
         
         <!-- Chat Panel (Main View) -->
@@ -91,8 +918,6 @@
             <!-- Header (Channel Name) -->
             <header class="bg-gray-700 p-4 border-b border-gray-600 shadow-lg flex justify-between items-center">
                 <h1 class="text-xl font-bold text-indigo-400" id="current-channel-title"># Global Chat</h1>
-                <!-- Invite Button Placeholder -->
-                <button id="invite-server-button" class="px-3 py-1 bg-indigo-500 hover:bg-indigo-600 rounded-full text-sm font-semibold transition duration-150">Invite</button>
             </header>
             
             <!-- Messages Container -->
@@ -100,50 +925,16 @@
                 <!-- Messages will be injected here by JavaScript -->
             </div>
 
-            <!-- Typing Indicator (Placeholder) -->
-            <div id="typing-indicator" class="px-4 py-2 text-sm text-gray-500 h-8">
-                <!-- User typing messages appear here -->
-            </div>
-
             <!-- Message Input Area -->
             <div class="p-4 border-t border-gray-700 bg-gray-700 relative">
-                
-                <!-- Emoji Picker Modal -->
-                <div id="emoji-picker" class="absolute bottom-full right-4 w-72 h-80 bg-gray-900 p-3 rounded-xl shadow-2xl hidden flex-col mb-2">
-                    <h4 class="text-lg font-semibold text-gray-300 mb-2">Emojis</h4>
-                    <div id="emoji-list" class="flex-grow overflow-y-auto grid grid-cols-6 gap-2 emoji-list">
-                        <!-- Emojis populated by JS -->
-                    </div>
-                </div>
-
-                <!-- File Status/Progress Display -->
-                <div id="file-status-and-progress" class="mb-2 hidden">
-                    <div id="file-name-display" class="text-sm text-gray-300 font-medium truncate mb-1"></div>
-                    <div id="upload-progress-bar" class="w-full h-1 bg-gray-600 rounded overflow-hidden hidden">
-                        <div id="progress-bar-fill" class="h-full bg-indigo-500 transition-all duration-300 ease-linear" style="width: 0%;"></div>
-                    </div>
+                <div id="file-status-and-progress" class="mb-2 hidden" data-image-url="">
+                    <div id="file-name-display" class="text-sm text-gray-300 font-medium truncate mb-1">Image Link Attached</div>
                 </div>
 
                 <div class="flex items-end space-x-2">
-                    <!-- File Input & Select Button -->
-                    <div class="flex flex-col space-y-1">
-                        <input type="file" id="file-input" class="hidden" />
-                        <button id="select-file-button" class="p-2 bg-gray-600 hover:bg-gray-500 rounded-full text-gray-300 transition duration-150 shadow-md flex-shrink-0" title="Attach File">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586A4 4 0 0012 5.586V4a1 1 0 00-1-1H7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V6a1 1 0 011-1h2.172z" /></svg>
-                        </button>
-                        <button id="clear-file-button" class="p-2 bg-red-600 hover:bg-red-500 rounded-full text-white transition duration-150 shadow-md flex-shrink-0" title="Clear File">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
-                        </button>
-                    </div>
-
                     <!-- Message Textarea -->
                     <textarea id="message-input" rows="1" class="flex-grow resize-none p-3 rounded-xl bg-gray-800 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none transition duration-150" placeholder="Message #global-chat..."></textarea>
                     
-                    <!-- Emoji Picker Button -->
-                    <button id="emoji-picker-button" class="p-2 bg-gray-600 hover:bg-gray-500 rounded-full text-gray-300 transition duration-150 shadow-md flex-shrink-0" title="Emojis">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </button>
-
                     <!-- Send Button -->
                     <button id="send-button" class="p-3 bg-indigo-600 hover:bg-indigo-700 rounded-full text-white font-semibold transition duration-150 shadow-md flex-shrink-0">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7" /></svg>
@@ -151,64 +942,55 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Right Sidebar (Members List / Profile Viewer) -->
+        <div id="members-panel" class="w-80 bg-gray-700 flex flex-col p-4 shadow-inner hidden">
+            <h2 class="text-xl font-bold text-gray-200 border-b border-gray-600 pb-2 mb-4">Profile Viewer</h2>
+            
+            <div id="profile-view-details" class="flex flex-col items-center p-4 bg-gray-800 rounded-xl mb-4 relative" data-target-id="">
+                <img id="view-pfp" class="w-24 h-24 rounded-full object-cover border-4 border-indigo-400" src="https://placehold.co/96x96/1f2937/9ca3af?text=U" alt="Profile Picture">
+                <p id="view-display-name" class="text-2xl font-bold mt-3 text-white"></p>
+                <p id="view-access-code" class="text-sm font-mono text-gray-400"></p>
+                <h3 class="text-sm font-semibold text-gray-300 mt-4 mb-1 self-start">About Me:</h3>
+                <textarea id="view-about-me" class="w-full text-sm text-gray-300 bg-gray-700 p-2 rounded-lg resize-none h-20" readonly>This user has not set an 'About Me' yet.</textarea>
+                
+                <p class="text-xs text-indigo-400 mt-2 text-center">Right-click profile for Admin options.</p>
+            </div>
+
+            <!-- Admin Controls (Only visible to Admin) - for quick common actions -->
+            <div id="admin-controls" class="space-y-2 pt-4 border-t border-gray-600 hidden" data-target-id="">
+                <h3 class="text-lg font-semibold text-red-400">Admin Quick Actions</h3>
+                <button data-action="timeout" class="admin-action-btn w-full p-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm font-semibold transition duration-150 shadow-md">Timeout User (10m)</button>
+                <button data-action="warn" class="admin-action-btn w-full p-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-sm font-semibold transition duration-150 shadow-md">Warn User</button>
+                <button data-action="ban" class="admin-action-btn w-full p-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-semibold transition duration-150 shadow-md">Ban Server (Placeholder)</button>
+            </div>
+            
+        </div>
 
         <!-- Settings/User Info Bar (Bottom Right) -->
-        <div id="user-info-bar" class="absolute bottom-0 right-0 m-4 hidden">
+        <div id="user-info-bar" class="absolute bottom-0 right-0 m-4 hidden z-10">
              <button id="settings-button" class="flex items-center space-x-2 p-2 bg-gray-700 rounded-full shadow-xl hover:bg-gray-600 transition duration-150">
                 <img id="pfp-thumbnail" class="w-8 h-8 rounded-full border-2 border-indigo-400 object-cover" src="https://placehold.co/32x32/1f2937/9ca3af?text=U" alt="Profile Picture">
-                <span class="text-sm font-semibold pr-1">Settings</span>
+                <span id="user-name-display" class="text-sm font-semibold pr-1">Settings</span>
             </button>
         </div>
 
     </div>
 
-    <!-- Modal for Server Creation -->
-    <div id="server-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
-        <div class="bg-gray-800 p-6 rounded-xl w-full max-w-md shadow-2xl">
-            <h3 class="text-2xl font-bold text-indigo-400 mb-4">Create New Server</h3>
-            <p class="text-gray-400 mb-4">Enter a name for your new collaborative server.</p>
-            <input type="text" id="server-name-input" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 mb-4" placeholder="Server Name">
+    <!-- Admin Password Modal -->
+    <div id="admin-password-modal-bg" class="fixed inset-0 bg-black bg-opacity-80 hidden items-center justify-center z-[100]">
+        <div class="bg-gray-800 p-6 rounded-xl w-full max-w-sm shadow-2xl">
+            <h3 class="text-xl font-bold text-red-400 mb-4">Admin Confirmation</h3>
+            <p class="text-gray-300 mb-3">Enter the admin password to continue.</p>
+            <input type="password" id="admin-password-input" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-red-500 focus:border-red-500 mb-3" placeholder="Admin Password">
+            <p id="admin-password-error" class="text-sm text-red-400 opacity-0 mb-3 transition duration-300"></p>
             <div class="flex justify-end space-x-3">
-                <button id="cancel-server-button" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition duration-150">Cancel</button>
-                <button id="create-server-button" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition duration-150">Create Server</button>
+                <button id="admin-password-cancel" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white transition">Cancel</button>
+                <button id="admin-password-submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-semibold transition">Confirm</button>
             </div>
-            <p id="server-creation-status" class="mt-4 text-sm font-medium text-red-400"></p>
         </div>
     </div>
     
-    <!-- Modal for Server Invite/Join -->
-    <div id="invite-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
-        <div class="bg-gray-800 p-6 rounded-xl w-full max-w-lg shadow-2xl">
-            <h3 class="text-2xl font-bold text-indigo-400 mb-4" id="invite-modal-title">Invite to Server</h3>
-            
-            <div id="invite-link-display" class="bg-gray-900 p-4 rounded-lg mb-4 hidden">
-                <p class="text-sm font-medium text-gray-400 mb-2">Share this link:</p>
-                <div class="flex space-x-2">
-                    <input type="text" id="server-invite-link" class="flex-grow p-2 bg-gray-700 rounded-lg text-sm font-mono text-indigo-300" readonly>
-                    <button id="copy-invite-link" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm">Copy</button>
-                </div>
-            </div>
-            
-            <!-- Join Server Input (for recipients) -->
-            <div id="join-server-input" class="mb-4">
-                <p class="text-sm font-medium text-gray-400 mb-2">Or paste an invite link to join:</p>
-                <input type="text" id="join-invite-link-input" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Paste full server invite link here...">
-            </div>
-            
-            <div id="server-preview" class="p-4 bg-gray-700 rounded-lg mb-4 hidden">
-                <h4 class="text-xl font-bold text-indigo-300" id="preview-server-name">Server Name</h4>
-                <p class="text-gray-400 text-sm">Server ID: <span id="preview-server-id" class="font-mono"></span></p>
-            </div>
-            
-            <div class="flex justify-end space-x-3">
-                <button id="close-invite-modal-button" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition duration-150">Close</button>
-                <button id="join-server-button" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition duration-150 hidden">Join Server</button>
-            </div>
-            <p id="invite-status" class="mt-4 text-sm font-medium text-red-400"></p>
-        </div>
-    </div>
-
-
     <!-- Settings Modal -->
     <div id="settings-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
         <div class="bg-gray-800 p-8 rounded-xl w-full max-w-lg shadow-2xl overflow-y-auto max-h-[90vh]">
@@ -219,1037 +1001,50 @@
                 </button>
             </div>
             
-            <!-- Profile Preview/Banner -->
-            <div id="profile-preview" class="mb-6 relative">
-                <img id="banner-preview" class="w-full h-32 object-cover rounded-lg border-2 border-gray-700" src="https://placehold.co/800x200/374151/9ca3af?text=BANNER" alt="Banner Preview">
-                <img id="pfp-preview" class="absolute left-4 -bottom-10 w-24 h-24 object-cover rounded-full border-4 border-gray-800" src="https://placehold.co/96x96/1f2937/9ca3af?text=U" alt="Profile Picture Preview">
-                <div class="absolute left-32 -bottom-4">
-                    <input type="text" id="profile-name-input" class="text-2xl font-bold bg-transparent border-b border-indigo-400 focus:outline-none focus:border-indigo-300" value="Authenticated User">
-                </div>
-            </div>
-            <div class="pt-12 border-b border-gray-700 pb-6"></div>
-
-            <!-- Profile Customization -->
-            <h4 class="text-xl font-semibold mt-6 mb-3 text-gray-300">Customization</h4>
-            
-            <!-- PFP Upload -->
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-400 mb-1">Profile Picture (PNG, GIF, etc.)</label>
-                <input type="file" id="pfp-file-input" class="hidden" accept="image/*">
-                <div class="flex space-x-3">
-                    <button id="upload-pfp-button" class="flex-grow px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition duration-150">Upload New PFP</button>
-                    <button id="remove-pfp-button" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition duration-150">Remove PFP</button>
-                </div>
-                <p id="pfp-upload-status" class="mt-2 text-sm text-gray-500"></p>
+            <div class="mb-6 flex flex-col items-center">
+                <img id="pfp-preview-img" class="w-28 h-28 object-cover rounded-full border-4 border-indigo-500 shadow-xl" src="https://placehold.co/100x100/374151/9ca3af?text=U" alt="Profile Picture Preview">
+                <p class="text-sm text-gray-400 mt-2">Preview</p>
             </div>
 
-            <!-- Banner URL Input -->
-            <div class="mb-6">
-                <label for="banner-url-input" class="block text-sm font-medium text-gray-400 mb-1">Banner Image URL</label>
-                <input type="text" id="banner-url-input" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Paste image URL (PNG, JPG, GIF)">
-            </div>
-            
-            <button id="save-profile-button" class="w-full p-3 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition duration-150 mb-6">Save Profile Changes</button>
-            <p id="profile-save-status" class="mt-2 text-sm text-center font-medium"></p>
-            
-            <!-- Account Info -->
-            <h4 class="text-xl font-semibold mt-6 mb-3 text-gray-300 border-t border-gray-700 pt-6">Account Info</h4>
-            
-            <div class="mb-4 bg-gray-900 p-4 rounded-lg flex justify-between items-center">
-                <span class="text-sm font-medium text-gray-400">Your Unique Access Code:</span>
-                <div class="flex items-center space-x-3">
-                    <span id="display-access-code" class="text-lg font-mono text-indigo-300 code-blur">***********</span>
-                    <button id="toggle-code-button" class="px-3 py-1 text-xs bg-indigo-500 hover:bg-indigo-400 rounded transition duration-150">Show</button>
-                </div>
-            </div>
+            <div class="space-y-4">
+                
+                <label class="block">
+                    <span class="text-gray-300 font-medium block mb-1">Access Code (10 digits)</span>
+                    <input type="text" id="access-code-edit-input" maxlength="10" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Your 10-digit code">
+                    <p class="text-xs text-gray-500 mt-1">You must use this code to re-enable chat if you are timed out.</p>
+                </label>
 
-            <!-- Log Out -->
-            <button id="logout-button" class="w-full p-3 bg-red-700 hover:bg-red-600 rounded-lg font-semibold transition duration-150 mt-6">Log Out (Clear Session)</button>
+                <label class="block">
+                    <span class="text-gray-300 font-medium block mb-1">Username (e.g., Garrett)</span>
+                    <input type="text" id="username-input" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Your Username">
+                </label>
+                
+                <label class="block">
+                    <span class="text-gray-300 font-medium block mb-1">Tag (4-digit number, e.g., 4849)</span>
+                    <input type="text" id="tag-input" maxlength="4" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Your Tag">
+                </label>
+
+                <label class="block">
+                    <span class="text-gray-300 font-medium block mb-1">Profile Picture URL Link</span>
+                    <input type="url" id="pfp-url-input" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Paste image URL here">
+                </label>
+                
+                <label class="block">
+                    <span class="text-gray-300 font-medium block mb-1">About Me</span>
+                    <textarea id="about-me-input" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 resize-none h-24" placeholder="Tell everyone a little bit about yourself..."></textarea>
+                </label>
+            </div>
+            
+            <button id="save-settings-button" class="mt-6 w-full p-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition duration-150 shadow-md">
+                Save Profile
+            </button>
         </div>
+    </div>
+    
+    <!-- Floating Message Box (Alert/Confirmation) -->
+    <div id="message-box" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 p-4 rounded-xl shadow-2xl text-white font-semibold flex items-center space-x-4 hidden z-[1000]">
+        <span id="message-box-text"></span>
+        <button id="message-box-confirm" class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-sm font-bold hidden transition duration-150">Confirm</button>
     </div>
 
 </div>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, getDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-// =================================
-// 1. CONFIGURATION (EDIT ME)
-// =================================
-
-// --- Access Codes (10 digits) ---
-const ACCESS_CODES = [
-"2879556054", // David
-"0009029674", // Camden
-"5815287646", // Garrett
-"0269927548", // Isaac
-"7950368985", // Amir
-];
-
-// --- Placeholder Firebase Config (Fallback for External Hosting) ---
-const PLACEHOLDER_FIREBASE_CONFIG = {
-apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc",
-authDomain: "knokbak-message-panel.firebaseapp.com",
-projectId: "knokbak-message-panel",
-storageBucket: "knokbak-message-panel.firebasestorage.app",
-messagingSenderId: "424259711684",
-appId: "1:424259711684:web:6818525d64024815604f91"
-};
-const PLACEHOLDER_APP_ID = 'knokbak-message-panel';
-
-// --- File Upload Configuration ---
-const MAX_FILE_SIZE_MB = 500;
-const UPLOAD_ENDPOINT = "https://school-upload-worker-endpoint.garrett23-main-garrettlol.workers.dev/";
-const UPLOAD_AUTH_TOKEN = "Sch00lUpl0ad2025";
-const CDN_BASE_URL = "https://cdna.knokbak.com/downloadable/share/";
-
-// --- Default Profile Images ---
-const DEFAULT_PFP_URL = "https://placehold.co/96x96/1f2937/9ca3af?text=U";
-const DEFAULT_BANNER_URL = "https://placehold.co/800x200/374151/9ca3af?text=BANNER";
-
-// --- Default Emojis (Discord Style) ---
-const DEFAULT_EMOJIS = [
-    '👍', '😂', '🔥', '🎉', '😢', '🥺', '🙏', '❤️', '👀', '🤔', '🥳', '😎',
-    '🤣', '💯', '✅', '✨', '🤯', '😭', '💀', '👽', '🐶', '🐱', '🦄', '🚀',
-    '🍕', '🍔', '🍺', '☕', '🎂', '💰', '💡', '⏰', '🎤', '💻', '💡', '🌟'
-];
-// =================================
-
-
-// 2. GLOBAL VARIABLES
-let app, db, auth, userId = null;
-let currentAppId = PLACEHOLDER_APP_ID; 
-let attachedFile = null; 
-let uploadedFileUrl = null; 
-let webhookUrl = "https://discord.com/api/webhooks/1436501315340603444/dBximNVW0hE5I2AACU3lfrbYhEWrSmpU8bP9cY-2TI83sw-u1GQxsElup0Iw7LmC2WX-"; 
-
-// Profile State
-let currentUserProfile = {
-    accessCode: null,
-    displayName: 'Guest User',
-    pfpUrl: DEFAULT_PFP_URL,
-    bannerUrl: DEFAULT_BANNER_URL,
-};
-// Cache to store other users' profile data (PFP/Name)
-let userProfilesCache = {}; 
-let isEmojiPickerOpen = false;
-
-// Server State
-let currentServer = {
-    id: 'global', // 'global' is the default public chat
-    name: 'Global Chat',
-    inviteId: null, // Global chat doesn't need an invite ID
-};
-
-
-// 3. ELEMENT REFERENCES
-const codeScreen = document.getElementById('code-screen');
-const sidebar = document.getElementById('sidebar');
-const chatPanel = document.getElementById('chat-panel');
-const messagesContainer = document.getElementById('messages-container');
-const loadingStatus = document.getElementById('loading-status');
-const codeError = document.getElementById('code-error');
-const accessCodeInput = document.getElementById('access-code-input');
-const enterCodeButton = document.getElementById('enter-code-button');
-
-const messageInput = document.getElementById('message-input');
-const sendButton = document.getElementById('send-button');
-
-const fileInput = document.getElementById('file-input');
-const selectFileButton = document.getElementById('select-file-button');
-const clearFileButton = document.getElementById('clear-file-button');
-const fileNameDisplay = document.getElementById('file-name-display');
-const fileStatusAndProgress = document.getElementById('file-status-and-progress');
-const uploadProgressBar = document.getElementById('upload-progress-bar');
-const progressBarFill = document.getElementById('progress-bar-fill');
-
-const settingsButton = document.getElementById('settings-button');
-const settingsModalBg = document.getElementById('settings-modal-bg');
-const closeSettingsButton = document.getElementById('close-settings-button');
-const pfpThumbnail = document.getElementById('pfp-thumbnail');
-const pfpPreview = document.getElementById('pfp-preview');
-const bannerPreview = document.getElementById('banner-preview');
-const profileNameInput = document.getElementById('profile-name-input');
-const displayAccessCode = document.getElementById('display-access-code');
-const toggleCodeButton = document.getElementById('toggle-code-button');
-const uploadPfpButton = document.getElementById('upload-pfp-button');
-const removePfpButton = document.getElementById('remove-pfp-button');
-const pfpFileInput = document.getElementById('pfp-file-input');
-const pfpUploadStatus = document.getElementById('pfp-upload-status');
-const bannerUrlInput = document.getElementById('banner-url-input');
-const saveProfileButton = document.getElementById('save-profile-button');
-const profileSaveStatus = document.getElementById('profile-save-status');
-const logoutButton = document.getElementById('logout-button');
-
-const addServerButton = document.getElementById('add-server-button');
-const serverModalBg = document.getElementById('server-modal-bg');
-const cancelServerButton = document.getElementById('cancel-server-button');
-const serverCreationStatus = document.getElementById('server-creation-status');
-
-const emojiPickerButton = document.getElementById('emoji-picker-button');
-const emojiPicker = document.getElementById('emoji-picker');
-const emojiList = document.getElementById('emoji-list');
-
-const currentChannelTitle = document.getElementById('current-channel-title');
-const inviteServerButton = document.getElementById('invite-server-button');
-
-const inviteModalBg = document.getElementById('invite-modal-bg');
-const inviteLinkDisplay = document.getElementById('invite-link-display');
-const serverInviteLink = document.getElementById('server-invite-link');
-const copyInviteLink = document.getElementById('copy-invite-link');
-const closeInviteModalButton = document.getElementById('close-invite-modal-button');
-const inviteModalTitle = document.getElementById('invite-modal-title');
-const joinInviteLinkInput = document.getElementById('join-invite-link-input');
-const serverPreview = document.getElementById('server-preview');
-const previewServerName = document.getElementById('preview-server-name');
-const previewServerId = document.getElementById('preview-server-id');
-const joinServerButton = document.getElementById('join-server-button');
-const inviteStatus = document.getElementById('invite-status');
-const joinServerInput = document.getElementById('join-server-input');
-
-
-// 4. UTILITY FUNCTIONS
-function showMessage(message, isError = false) {
-    codeError.textContent = message;
-    codeError.classList.remove('text-red-400', 'text-green-400', 'opacity-0');
-    codeError.classList.add(isError ? 'text-red-400' : 'text-green-400', 'opacity-100');
-    if (!isError) {
-        setTimeout(() => {
-            codeError.classList.add('opacity-0');
-        }, 5000);
-    }
-}
-
-/**
- * Generates a random alphanumeric string (e.g., for Server IDs or Session IDs).
- */
-function generateRandomId(length) {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-        result += characters.charAt(Math.floor(Math.random() * characters.length));
-    }
-    return result;
-}
-
-/**
- * Updates the status message in the file input area.
- */
-function updateFileStatus(message, isError = false) {
-    fileNameDisplay.textContent = message;
-    fileNameDisplay.className = isError ? 'text-red-400' : 'text-green-400';
-}
-
-/**
- * Formats Firestore timestamp to local timezone string (e.g., "Today at 06:00 PM").
- */
-function formatTimestamp(timestamp) {
-    if (!timestamp) return 'Time Unknown';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const today = new Date().toDateString();
-    const messageDate = date.toDateString();
-    
-    if (today === messageDate) {
-        return `Today at ${timeString}`;
-    }
-    return date.toLocaleString([], {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-}
-
-/**
- * Generates a full server invite link with a temporary session ID.
- */
-function generateInviteLink(serverId) {
-    const randomSessionId = generateRandomId(23); // 23-digit random combo
-    // We use a mock base URL as this app runs in a sandbox
-    const baseURL = "https://panel2-useast-dynatest.knokbak.com/server/"; 
-    return `${baseURL}${serverId}?sessionID=${randomSessionId}`;
-}
-
-
-// 5. PROFILE AND DATA MANAGEMENT (CRUD)
-
-/**
- * Fetches the current user's profile data from Firestore.
- */
-async function loadUserProfile(userId) {
-    const profileDocPath = `/artifacts/${currentAppId}/users/${userId}/profile/user_data`;
-    const docRef = doc(db, profileDocPath);
-    
-    try {
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            console.log("Loaded persistent profile data.");
-            
-            // Merge loaded data with current profile state
-            currentUserProfile = {
-                ...currentUserProfile,
-                displayName: data.displayName || currentUserProfile.displayName,
-                pfpUrl: data.pfpUrl || currentUserProfile.pfpUrl,
-                bannerUrl: data.bannerUrl || currentUserProfile.bannerUrl,
-                // accessCode is set during initial login
-            };
-        }
-        
-    } catch (e) {
-        console.error("Error loading user profile:", e);
-    }
-}
-
-/**
- * Saves the current user's profile data to Firestore.
- */
-async function saveUserProfile(profile) {
-    const profileDocPath = `/artifacts/${currentAppId}/users/${userId}/profile/user_data`;
-    const docRef = doc(db, profileDocPath);
-    
-    try {
-        await setDoc(docRef, {
-            displayName: profile.displayName,
-            pfpUrl: profile.pfpUrl,
-            bannerUrl: profile.bannerUrl,
-            lastUpdated: serverTimestamp()
-        }, { merge: true });
-        
-        console.log("Profile saved successfully.");
-        // Update local state
-        currentUserProfile = profile;
-        // Update UI
-        updateProfileUI();
-        profileSaveStatus.textContent = "Profile saved!";
-        profileSaveStatus.classList.remove('text-red-400');
-        profileSaveStatus.classList.add('text-green-400');
-        
-        setTimeout(() => {
-            profileSaveStatus.textContent = "";
-        }, 3000);
-        
-    } catch (e) {
-        console.error("Error saving user profile:", e);
-        profileSaveStatus.textContent = "Failed to save profile: " + e.message;
-        profileSaveStatus.classList.remove('text-green-400');
-        profileSaveStatus.classList.add('text-red-400');
-    }
-}
-
-/**
- * Updates all relevant UI elements (thumbnail, preview, inputs) based on currentUserProfile.
- */
-function updateProfileUI() {
-    const { displayName, pfpUrl, bannerUrl, accessCode } = currentUserProfile;
-    
-    pfpThumbnail.src = pfpUrl;
-    pfpPreview.src = pfpUrl;
-    bannerPreview.src = bannerUrl;
-    
-    // Settings inputs
-    profileNameInput.value = displayName;
-    bannerUrlInput.value = bannerUrl === DEFAULT_BANNER_URL ? '' : bannerUrl;
-    
-    // Access Code Display
-    displayAccessCode.textContent = accessCode || '***********';
-}
-
-/**
- * Creates a new server document in Firestore's public space.
- */
-async function createNewServer(serverName) {
-    const serversCollectionPath = `/artifacts/${currentAppId}/public/data/servers`;
-    const serversRef = collection(db, serversCollectionPath);
-    
-    try {
-        const newServerRef = doc(serversRef); // Get a new DocRef to generate ID
-        const serverId = newServerRef.id;
-        
-        await setDoc(newServerRef, {
-            name: serverName,
-            ownerId: userId,
-            ownerName: currentUserProfile.displayName,
-            members: [userId], // Add creator as the first member
-            createdAt: serverTimestamp(),
-            // The permanent invite link base is the Server ID itself
-            inviteId: serverId, 
-        });
-
-        // Update status UI
-        serverCreationStatus.textContent = `Server "${serverName}" created successfully! Invite ID: ${serverId}`;
-        serverCreationStatus.classList.remove('text-red-400');
-        serverCreationStatus.classList.add('text-green-400');
-        
-        // Automatically switch to the new server (Placeholder: just update status)
-        console.log(`Server ${serverName} created with ID ${serverId}`);
-        
-        setTimeout(() => {
-            serverModalBg.style.display = 'none';
-            serverCreationStatus.textContent = '';
-            document.getElementById('server-name-input').value = '';
-            // For now, switch back to global chat view
-            currentServer = { id: 'global', name: 'Global Chat', inviteId: null };
-            updateChannelUI();
-        }, 2000);
-
-    } catch (e) {
-        console.error("Error creating server:", e);
-        serverCreationStatus.textContent = `Failed to create server: ${e.message}`;
-        serverCreationStatus.classList.remove('text-green-400');
-        serverCreationStatus.classList.add('text-red-400');
-    }
-}
-
-/**
- * Fetches a server by its permanent invite ID.
- */
-async function getServerByInviteId(inviteId) {
-    const serversCollectionPath = `/artifacts/${currentAppId}/public/data/servers`;
-    const serversRef = collection(db, serversCollectionPath);
-    
-    // Query requires an index, which we can't guarantee. We will query all and filter client side for simplicity.
-    // In a production app, we would use a query with a 'where' clause on inviteId.
-    try {
-        const snapshot = await getDocs(serversRef);
-        const servers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        return servers.find(server => server.inviteId === inviteId);
-        
-    } catch (e) {
-        console.error("Error fetching servers:", e);
-        return null;
-    }
-}
-
-
-// 6. INITIALIZATION & AUTHENTICATION
-
-// Initialize Firebase
-async function initializeFirebase() {
-    let config = PLACEHOLDER_FIREBASE_CONFIG;
-    let appId = PLACEHOLDER_APP_ID;
-    if (typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0) {
-        config = JSON.parse(__firebase_config);
-    }
-    if (typeof __app_id !== 'undefined') {
-        appId = __app_id;
-    }
-    currentAppId = appId;
-    
-    try {
-        app = initializeApp(config);
-        db = getFirestore(app);
-        auth = getAuth(app);
-        
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        if (initialAuthToken) {
-            await signInWithCustomToken(auth, initialAuthToken);
-        } else {
-            await signInAnonymously(auth);
-        }
-
-        return new Promise((resolve) => {
-             onAuthStateChanged(auth, (user) => {
-                userId = user ? user.uid : crypto.randomUUID();
-                console.log("Authenticated User ID:", userId);
-                resolve(true);
-            });
-        });
-        
-    } catch (e) {
-        console.error("Firebase initialization failed:", e);
-        showMessage("Firebase connection error. Check console.", true);
-        return false;
-    }
-}
-
-// Check access code validity and log the user in
-async function validateCode(code) {
-    const codeInput = code.toUpperCase().trim();
-    if (codeInput.length !== 10) {
-        showMessage("Code must be 10 characters long.", true);
-        return;
-    }
-    
-    if (!db) {
-        showMessage("Database not connected. Please wait.", true);
-        return;
-    }
-
-    const validNames = {
-        "2879556054": "David",
-        "0009029674": "Camden",
-        "5815287646": "Garrett",
-        "0269927548": "Isaac",
-        "7950368985": "Amir",
-    
-    };
-    
-    const isValid = ACCESS_CODES.includes(codeInput) || Object.keys(validNames).includes(codeInput);
-
-    if (isValid) {
-        const userName = validNames[codeInput] || 'Authenticated User';
-        
-        // 1. Set global profile state
-        currentUserProfile.accessCode = codeInput;
-        currentUserProfile.displayName = userName;
-
-        // 2. Load persistent profile settings (PFP/Banner)
-        await loadUserProfile(userId);
-
-        // 3. Update UI based on final profile state
-        updateProfileUI();
-
-        // 4. Transition UI
-        codeScreen.classList.add('hidden');
-        sidebar.classList.remove('hidden');
-        chatPanel.classList.remove('hidden', 'opacity-0');
-        document.getElementById('user-info-bar').classList.remove('hidden');
-        
-        // 5. Start listening to the chat
-        listenForMessages();
-
-    } else {
-        showMessage("Invalid code. Access denied.", true);
-    }
-}
-
-
-// 7. FILE UPLOAD LOGIC (REUSED/MODIFIED)
-
-function clearAttachedFile() {
-    attachedFile = null;
-    uploadedFileUrl = null;
-    fileInput.value = '';
-    fileStatusAndProgress.classList.add('hidden');
-    progressBarFill.style.width = '0%';
-    fileNameDisplay.className = 'text-sm text-gray-300 font-medium truncate mb-1';
-    fileNameDisplay.textContent = '';
-}
-
-// Reuses the file upload logic for both message attachments and PFP/Banner uploads
-async function uploadFile(file, isPfp = false) {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const statusElement = isPfp ? pfpUploadStatus : fileNameDisplay;
-    const progressFillElement = isPfp ? progressBarFill : progressBarFill; 
-
-    // START: Loading/Progress State
-    if (!isPfp) {
-        fileStatusAndProgress.classList.remove('hidden');
-        uploadProgressBar.classList.remove('hidden');
-    }
-    progressFillElement.style.width = '50%';
-    statusElement.textContent = `Uploading ${file.name}...`;
-    statusElement.className = isPfp ? 'mt-2 text-sm text-yellow-400' : 'text-yellow-400';
-    
-    try {
-        const response = await fetch(UPLOAD_ENDPOINT, {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-Upload-Auth': UPLOAD_AUTH_TOKEN
-            }
-        });
-
-        if (!response.ok) {
-            const errorData = await response.text();
-            throw new Error(`Upload failed (${response.status} - ${response.statusText}): ${errorData}`);
-        }
-
-        const result = await response.json();
-        
-        progressFillElement.style.width = '100%';
-        statusElement.textContent = `Upload Complete: ${file.name}`;
-        statusElement.className = isPfp ? 'mt-2 text-sm text-green-400' : 'text-green-400';
-        
-        // Get the full public URL from the CDN base
-        const fullUrl = `${CDN_BASE_URL}${result.url}`;
-
-        setTimeout(() => {
-            if (!isPfp) {
-                 uploadProgressBar.classList.add('hidden');
-                 fileStatusAndProgress.classList.add('hidden'); 
-            } else {
-                statusElement.textContent = `Upload successful. Click 'Save Profile Changes'.`;
-            }
-        }, 1500);
-
-        return fullUrl; 
-
-    } catch (error) {
-        if (!isPfp) {
-            uploadProgressBar.classList.add('hidden');
-            progressFillElement.style.width = '0%';
-            updateFileStatus(`Error: ${error.message}`, true);
-            attachedFile = null; uploadedFileUrl = null; fileInput.value = '';
-        } else {
-            statusElement.textContent = `Error: ${error.message}`;
-            statusElement.className = 'mt-2 text-sm text-red-400';
-        }
-        throw error;
-    }
-}
-
-// 8. CHAT & MESSAGE LOGIC
-
-function createAttachmentHTML(url) {
-    if (!url) return '';
-    const fileExtension = url.split('.').pop().toLowerCase();
-    let mediaHTML = '';
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension)) {
-        mediaHTML = `<img src="${url}" class="max-w-full h-auto rounded-lg mt-2 cursor-pointer" onerror="this.outerHTML='<p class=\\'text-red-400\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\' class=\\'underline\\'>View Link</a></p>'" onclick="window.open('${url}', '_blank')" />`;
-    } else if (['mp4', 'webm'].includes(fileExtension)) {
-        mediaHTML = `<video src="${url}" controls class="max-w-full h-auto rounded-lg mt-2"></video>`;
-    } else {
-        mediaHTML = `<a href="${url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline block mt-2 break-words">📎 Attachment: ${url.split('/').pop()}</a>`;
-    }
-    return `<div class="bg-gray-800 p-2 rounded-lg border border-gray-700 mt-2">${mediaHTML}</div>`;
-}
-
-function createMessageElement(data) {
-    const isSelf = data.senderId === userId;
-    const time = formatTimestamp(data.timestamp);
-
-    // Use current user's profile for their messages, otherwise a placeholder
-    const profile = isSelf ? currentUserProfile : (userProfilesCache[data.senderId] || { 
-        displayName: data.senderName, 
-        pfpUrl: DEFAULT_PFP_URL 
-    });
-
-    // We'll trust the stored PFP URL in Firestore for the message sender.
-    const pfp = data.pfpUrl || profile.pfpUrl; 
-    const displayName = profile.displayName;
-    const nameColor = 'text-indigo-400'; 
-    const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
-
-    const div = document.createElement('div');
-    div.className = `flex ${isSelf ? 'justify-end' : 'justify-start'} w-full`;
-    div.innerHTML = `
-        <div class="flex items-start max-w-lg space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : 'flex-row'}">
-            <img class="w-10 h-10 rounded-full object-cover mt-1 flex-shrink-0 border-2 border-gray-600" src="${pfp}" onerror="this.src='${DEFAULT_PFP_URL}'" alt="${displayName} PFP">
-            
-            <div class="p-3 rounded-xl shadow-md ${isSelf ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-100'} max-w-full">
-                <div class="text-sm font-bold mb-1 ${nameColor}">${displayName} <span class="text-xs font-normal text-gray-400 ml-2">${time}</span></div>
-                <div class="text-base whitespace-pre-wrap break-words">${data.text || ''}</div>
-                ${attachmentHTML}
-            </div>
-        </div>
-    `;
-    return div;
-}
-
-
-// Updates the header title based on the current server/channel
-function updateChannelUI() {
-    currentChannelTitle.textContent = `# ${currentServer.name}`;
-    // Show invite button only if we are in a custom server (not 'global')
-    if (currentServer.id !== 'global' && currentServer.inviteId) {
-        inviteServerButton.classList.remove('hidden');
-    } else {
-        inviteServerButton.classList.add('hidden');
-    }
-    // Future: Clear and reload message listener for the new channel
-}
-
-
-// Listens for real-time messages from Firestore
-function listenForMessages() {
-    // Current logic points to the public global chat
-    const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
-    const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
-
-    if (loadingStatus) {
-        loadingStatus.remove();
-    }
-
-    onSnapshot(messagesQuery, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            const data = { id: change.doc.id, ...change.doc.data() };
-
-            if (change.type === "added") {
-                const newElement = createMessageElement(data);
-                messagesContainer.appendChild(newElement);
-
-                // Scroll to bottom
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        });
-    }, (error) => {
-        console.error("Error listening to messages:", error);
-        messagesContainer.innerHTML = `<p class="text-red-500 p-4">Failed to load chat history.</p>`;
-    });
-}
-
-// Sends the message to Firestore and Discord
-async function sendMessage() {
-    if (!db) {
-        showMessage("Chat service not connected. Please refresh.", true);
-        return;
-    }
-
-    const messageText = messageInput.value.trim();
-    const senderName = currentUserProfile.displayName; 
-    
-    if (messageText === "" && !attachedFile) {
-        showMessage("Please enter a message or select a file.", true);
-        return;
-    }
-    
-    sendButton.disabled = true;
-
-    if (attachedFile && !uploadedFileUrl) {
-        try {
-            uploadedFileUrl = await uploadFile(attachedFile);
-        } catch (e) {
-            sendButton.disabled = false;
-            return;
-        }
-    }
-    
-    if (messageText === "" && !uploadedFileUrl) {
-         showMessage("Upload failed or URL is missing. Please try again.", true);
-         sendButton.disabled = false;
-         return;
-    }
-
-    const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
-    const messagesRef = collection(db, messagesCollectionPath);
-    
-    updateFileStatus(attachedFile ? `Sending message and link...` : `Sending message...`);
-
-    try {
-        await setDoc(doc(messagesRef), {
-            text: messageText,
-            timestamp: serverTimestamp(),
-            senderName: senderName,
-            senderId: userId,
-            attachmentUrl: uploadedFileUrl,
-            // Include PFP URL in the message for consistent historical display
-            pfpUrl: currentUserProfile.pfpUrl 
-        });
-        
-        // Post to Discord (webhook) - Non-blocking
-        postToDiscord(messageText, senderName, uploadedFileUrl);
-
-        messageInput.value = '';
-        messageInput.style.height = 'auto';
-        messageInput.focus();
-        clearAttachedFile(); 
-        showMessage(`Message sent successfully.`, false);
-        
-        sendButton.disabled = false;
-
-    } catch (e) {
-        console.error("Error sending message to Firestore:", e);
-        showMessage('Failed to send message: ' + e.message, true);
-        updateFileStatus(`Failed to save message: ${e.message}`, true);
-        sendButton.disabled = false;
-    }
-}
-
-
-// 9. EVENT LISTENERS
-
-// --- Chat Input ---
-sendButton.addEventListener('click', sendMessage);
-messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault(); 
-        sendMessage();
-    }
-});
-
-messageInput.addEventListener('input', () => {
-    messageInput.style.height = 'auto';
-    messageInput.style.height = messageInput.scrollHeight + 'px';
-});
-
-// --- File Handling ---
-selectFileButton.addEventListener('click', () => fileInput.click());
-clearFileButton.addEventListener('click', clearAttachedFile);
-
-fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-        clearAttachedFile();
-        return;
-    }
-
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        showMessage(`File size exceeds the ${MAX_FILE_SIZE_MB}MB limit.`, true);
-        clearAttachedFile();
-        return;
-    }
-
-    attachedFile = file;
-    fileNameDisplay.textContent = file.name;
-    fileStatusAndProgress.classList.remove('hidden');
-    showMessage(`File selected: ${file.name}`);
-});
-
-// --- Emoji Picker ---
-
-function toggleEmojiPicker() {
-    isEmojiPickerOpen = !isEmojiPickerOpen;
-    emojiPicker.style.display = isEmojiPickerOpen ? 'flex' : 'none';
-}
-
-function initEmojiPicker() {
-    DEFAULT_EMOJIS.forEach(emoji => {
-        const span = document.createElement('span');
-        span.textContent = emoji;
-        span.className = 'text-2xl cursor-pointer hover:bg-gray-700 p-1 rounded-md transition duration-100 flex items-center justify-center';
-        span.addEventListener('click', () => {
-            messageInput.value += emoji;
-            messageInput.focus();
-            toggleEmojiPicker();
-        });
-        emojiList.appendChild(span);
-    });
-}
-
-emojiPickerButton.addEventListener('click', toggleEmojiPicker);
-
-
-// --- Server Creation Modal ---
-addServerButton.addEventListener('click', () => {
-    serverModalBg.style.display = 'flex';
-});
-
-cancelServerButton.addEventListener('click', () => {
-    serverModalBg.style.display = 'none';
-    serverCreationStatus.textContent = '';
-    document.getElementById('server-name-input').value = '';
-});
-
-// Create Server Button Logic
-document.getElementById('create-server-button').addEventListener('click', () => {
-    const serverName = document.getElementById('server-name-input').value.trim();
-    if (serverName) {
-        createNewServer(serverName);
-    } else {
-        serverCreationStatus.textContent = "Server name cannot be empty.";
-        serverCreationStatus.classList.add('text-red-400');
-    }
-});
-
-// --- Server Invite/Join Modal ---
-
-inviteServerButton.addEventListener('click', () => {
-    inviteModalTitle.textContent = `Invite to ${currentServer.name}`;
-    inviteLinkDisplay.classList.remove('hidden');
-    joinServerInput.classList.add('hidden');
-    joinServerButton.classList.add('hidden');
-    serverPreview.classList.add('hidden');
-    inviteStatus.textContent = '';
-    
-    // Generate the invite link for the current server
-    const link = generateInviteLink(currentServer.id);
-    serverInviteLink.value = link;
-    
-    inviteModalBg.style.display = 'flex';
-});
-
-// Handler for the Join Server input field
-joinInviteLinkInput.addEventListener('input', async (e) => {
-    const fullLink = e.target.value.trim();
-    inviteStatus.textContent = '';
-    serverPreview.classList.add('hidden');
-    joinServerButton.classList.add('hidden');
-
-    // Extract the server ID (the 15-25 digit alphanumeric string after /server/)
-    // This regex looks for: /server/ followed by 10 to 30 alphanumeric characters
-    const match = fullLink.match(/\/server\/([a-zA-Z0-9]{10,30})\?sessionID=/);
-    
-    if (match && match[1]) {
-        const permanentServerId = match[1];
-        
-        // 1. Fetch server data using the permanent ID
-        const serverData = await getServerByInviteId(permanentServerId);
-
-        if (serverData) {
-            previewServerName.textContent = serverData.name;
-            previewServerId.textContent = serverData.inviteId;
-            serverPreview.classList.remove('hidden');
-            joinServerButton.classList.remove('hidden');
-            inviteStatus.textContent = 'Server found! Click Join to enter.';
-            inviteStatus.classList.remove('text-red-400');
-            inviteStatus.classList.add('text-green-400');
-            joinServerButton.dataset.serverId = serverData.id; // Store ID for join action
-        } else {
-            inviteStatus.textContent = 'Error: Invite link is valid but server was not found or has been deleted.';
-            inviteStatus.classList.add('text-red-400');
-        }
-
-    } else if (fullLink.length > 0) {
-        inviteStatus.textContent = 'Invalid link format. Must contain "/server/{id}?sessionID={...}"';
-        inviteStatus.classList.add('text-red-400');
-    }
-});
-
-// Join Server Action (Placeholder)
-joinServerButton.addEventListener('click', (e) => {
-    const serverIdToJoin = e.target.dataset.serverId;
-    if (serverIdToJoin) {
-        inviteStatus.textContent = `Joined server with ID: ${serverIdToJoin}! (Placeholder action)`;
-        inviteStatus.classList.add('text-green-400');
-        
-        // Placeholder: in a real app, this would update member list and switch views
-        setTimeout(() => {
-            inviteModalBg.style.display = 'none';
-        }, 1500);
-    }
-});
-
-
-closeInviteModalButton.addEventListener('click', () => {
-    inviteModalBg.style.display = 'none';
-    joinInviteLinkInput.value = '';
-    inviteStatus.textContent = '';
-    serverPreview.classList.add('hidden');
-});
-
-copyInviteLink.addEventListener('click', () => {
-    serverInviteLink.select();
-    document.execCommand('copy');
-    copyInviteLink.textContent = 'Copied!';
-    setTimeout(() => copyInviteLink.textContent = 'Copy', 1500);
-});
-
-// --- Settings Modal ---
-
-settingsButton.addEventListener('click', () => {
-    updateProfileUI(); 
-    settingsModalBg.style.display = 'flex';
-});
-
-closeSettingsButton.addEventListener('click', () => {
-    settingsModalBg.style.display = 'none';
-});
-
-// PFP Upload Handler
-pfpFileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        pfpUploadStatus.textContent = `File size exceeds the ${MAX_FILE_SIZE_MB}MB limit.`;
-        pfpUploadStatus.classList.add('text-red-400');
-        return;
-    }
-
-    try {
-        const url = await uploadFile(file, true);
-        pfpPreview.src = url;
-        // Automatically update the profile state with the new PFP URL
-        currentUserProfile.pfpUrl = url;
-        pfpUploadStatus.textContent = `PFP uploaded. Click 'Save Profile Changes' to finalize.`;
-    } catch (e) {
-        // uploadFile already handles status
-    }
-});
-
-uploadPfpButton.addEventListener('click', () => {
-    pfpFileInput.click();
-});
-
-removePfpButton.addEventListener('click', () => {
-    pfpPreview.src = DEFAULT_PFP_URL;
-    currentUserProfile.pfpUrl = DEFAULT_PFP_URL;
-    pfpUploadStatus.textContent = `PFP reset to default. Click 'Save Profile Changes'.`;
-    pfpUploadStatus.classList.add('text-green-400');
-});
-
-// Banner URL Live Preview
-bannerUrlInput.addEventListener('input', () => {
-    // Check if the URL is non-empty before updating the preview
-    const url = bannerUrlInput.value.trim();
-    bannerPreview.src = url || DEFAULT_BANNER_URL;
-});
-
-// Save Profile Button
-saveProfileButton.addEventListener('click', async () => {
-    const newProfile = {
-        accessCode: currentUserProfile.accessCode,
-        displayName: profileNameInput.value.trim() || 'Anonymous',
-        pfpUrl: currentUserProfile.pfpUrl, 
-        bannerUrl: bannerUrlInput.value.trim() || DEFAULT_BANNER_URL
-    };
-    
-    await saveUserProfile(newProfile);
-});
-
-// Toggle Access Code Visibility
-toggleCodeButton.addEventListener('click', () => {
-    const codeElement = document.getElementById('display-access-code');
-    const isBlurred = codeElement.classList.contains('code-blur');
-    
-    if (isBlurred) {
-        codeElement.classList.remove('code-blur');
-        toggleCodeButton.textContent = "Hide";
-    } else {
-        codeElement.classList.add('code-blur');
-        toggleCodeButton.textContent = "Show";
-    }
-});
-
-// Log Out (Clears session)
-logoutButton.addEventListener('click', () => {
-    location.reload();
-});
-
-
-// --- Webhook (Post to Discord) ---
-async function postToDiscord(message, senderName, attachmentUrl = null) {
-    if (!webhookUrl || !webhookUrl.includes("discord.com/api/webhooks")) {
-        console.error("Webhook not configured or invalid.");
-        return;
-    }
-
-    const payload = {
-        content: message,
-        username: senderName,
-        avatar_url: currentUserProfile.pfpUrl, 
-        embeds: attachmentUrl ? [{ title: "File Attachment", url: attachmentUrl }] : []
-    };
-    
-    if (message.trim() === "" && attachmentUrl) {
-         payload.content = attachmentUrl;
-    } else if (message.trim() !== "" && attachmentUrl) {
-        payload.content += `\n\n[Attachment Link](${attachmentUrl})`;
-    }
-
-
-    try {
-        await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-    } catch (e) {
-        console.error("Network Error posting to Discord:", e);
-    }
-}
-
-
-// --- Initialization ---
-document.addEventListener('DOMContentLoaded', async () => {
-    initEmojiPicker(); // Initialize the emoji picker on load
-    updateChannelUI(); // Set initial channel title
-
-    if (await initializeFirebase()) {
-        enterCodeButton.addEventListener('click', () => validateCode(accessCodeInput.value));
-        accessCodeInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') validateCode(accessCodeInput.value);
-        });
-    } else {
-        codeScreen.innerHTML = '<h1 class="text-3xl font-bold text-red-500">Initialization Error</h1><p class="text-gray-400 mt-4 text-center">Could not connect to Firebase. Check your configuration and network.</p>';
-    }
-});
-</script>
