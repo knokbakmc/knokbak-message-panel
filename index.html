@@ -43,10 +43,12 @@
 
         async function initFirebase() {
             try {
-                if (Object.keys(firebaseConfig).length === 0) {
-                    console.error("Firebase config is missing.");
-                    document.getElementById('loading-status').textContent = "Initialization failed: Firebase config missing.";
-                    return;
+                // Check if Firebase config is usable
+                if (!firebaseConfig || Object.keys(firebaseConfig).length === 0 || !firebaseConfig.apiKey) {
+                    document.getElementById('loading-status').textContent = "Initialization failed: Missing Firebase configuration details.";
+                    console.error("Firebase config is missing or incomplete.");
+                    // Keep the user on the code screen if config is missing.
+                    return; 
                 }
                 
                 setLogLevel('error'); // Use 'error' to suppress spammy debug logs
@@ -69,11 +71,11 @@
                     if (user) {
                         currentUserId = user.uid;
                         isAdmin = currentUserId === ADMIN_ID;
-                        document.getElementById('loading-status').textContent = "Authenticated successfully.";
+                        document.getElementById('loading-status').textContent = "Authenticated successfully. Loading profile...";
                         handleSuccessfulAuth();
                     } else {
                         currentUserId = null;
-                        document.getElementById('loading-status').textContent = "Signed out or anonymous.";
+                        document.getElementById('loading-status').textContent = "Signed out. Enter your code to continue.";
                         // If user is null, revert to login screen (unless it's a forced logout timer)
                         if (!document.getElementById('force-logout-timer').classList.contains('hidden')) return;
                         showCodeScreen();
@@ -722,7 +724,7 @@
                 if (e.target.closest('.save-edit-btn')) {
                     const btn = e.target.closest('.save-edit-btn');
                     const messageRow = btn.closest('.message-row');
-                    const messageId = messageRow.dataset.message-Id;
+                    const messageId = messageRow.dataset.messageId;
                     const editInput = messageRow.querySelector('.edit-input');
                     const newContent = editInput.value.trim();
                     const messageUserId = messageRow.dataset.userId;
@@ -890,7 +892,6 @@
     <div class="w-full max-w-7xl h-[90vh] bg-gray-800 rounded-xl shadow-2xl overflow-hidden flex" id="main-app-container">
         
         <!-- Access Code Screen (Initial State) -->
-        <!-- FIX: Removed 'hidden' class so the screen is visible during initialization/re-auth -->
         <div id="code-screen" class="absolute inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center p-8 transition-opacity duration-500">
             <h2 class="text-3xl font-bold mb-4 text-center text-indigo-400">Welcome to School Chat</h2>
             <p class="text-gray-400 mb-6 text-center">Enter your 10-digit Access Code to re-enable chat.</p>
