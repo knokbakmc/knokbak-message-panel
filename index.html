@@ -48,6 +48,18 @@
         .code-blur:hover {
             filter: blur(0);
         }
+        
+        /* Custom scrollbar for the emoji picker */
+        .emoji-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        .emoji-list::-webkit-scrollbar-thumb {
+            background-color: #6d28d9; /* Indigo-700 */
+            border-radius: 3px;
+        }
+        .emoji-list::-webkit-scrollbar-track {
+            background-color: #1f2937; /* Gray-800 */
+        }
     </style>
 
     <!-- Main Content Area -->
@@ -66,7 +78,7 @@
         <!-- Left Sidebar (Servers & DMs) -->
         <div id="sidebar" class="w-20 bg-gray-900 flex flex-col items-center py-3 space-y-3 hidden">
             <!-- Server/DM Icons go here -->
-            <div class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg">SC</div>
+            <div id="global-server-icon" class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg active-server">SC</div>
             <div class="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 text-xl font-bold hover:rounded-xl transition-all duration-200 cursor-pointer shadow-lg">DMs</div>
 
             <!-- Plus button for new server -->
@@ -78,8 +90,9 @@
             
             <!-- Header (Channel Name) -->
             <header class="bg-gray-700 p-4 border-b border-gray-600 shadow-lg flex justify-between items-center">
-                <h1 class="text-xl font-bold text-indigo-400"># Global Chat</h1>
-                <!-- Right side header elements can go here -->
+                <h1 class="text-xl font-bold text-indigo-400" id="current-channel-title"># Global Chat</h1>
+                <!-- Invite Button Placeholder -->
+                <button id="invite-server-button" class="px-3 py-1 bg-indigo-500 hover:bg-indigo-600 rounded-full text-sm font-semibold transition duration-150">Invite</button>
             </header>
             
             <!-- Messages Container -->
@@ -95,6 +108,14 @@
             <!-- Message Input Area -->
             <div class="p-4 border-t border-gray-700 bg-gray-700 relative">
                 
+                <!-- Emoji Picker Modal -->
+                <div id="emoji-picker" class="absolute bottom-full right-4 w-72 h-80 bg-gray-900 p-3 rounded-xl shadow-2xl hidden flex-col mb-2">
+                    <h4 class="text-lg font-semibold text-gray-300 mb-2">Emojis</h4>
+                    <div id="emoji-list" class="flex-grow overflow-y-auto grid grid-cols-6 gap-2 emoji-list">
+                        <!-- Emojis populated by JS -->
+                    </div>
+                </div>
+
                 <!-- File Status/Progress Display -->
                 <div id="file-status-and-progress" class="mb-2 hidden">
                     <div id="file-name-display" class="text-sm text-gray-300 font-medium truncate mb-1"></div>
@@ -118,8 +139,8 @@
                     <!-- Message Textarea -->
                     <textarea id="message-input" rows="1" class="flex-grow resize-none p-3 rounded-xl bg-gray-800 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none transition duration-150" placeholder="Message #global-chat..."></textarea>
                     
-                    <!-- Emoji Picker Button (Placeholder) -->
-                    <button id="emoji-picker-button" class="p-2 bg-gray-600 hover:bg-gray-500 rounded-full text-gray-300 transition duration-150 shadow-md flex-shrink-0" title="Emojis (Coming Soon)">
+                    <!-- Emoji Picker Button -->
+                    <button id="emoji-picker-button" class="p-2 bg-gray-600 hover:bg-gray-500 rounded-full text-gray-300 transition duration-150 shadow-md flex-shrink-0" title="Emojis">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </button>
 
@@ -134,7 +155,6 @@
         <!-- Settings/User Info Bar (Bottom Right) -->
         <div id="user-info-bar" class="absolute bottom-0 right-0 m-4 hidden">
              <button id="settings-button" class="flex items-center space-x-2 p-2 bg-gray-700 rounded-full shadow-xl hover:bg-gray-600 transition duration-150">
-                 <!-- Profile Picture Placeholder -->
                 <img id="pfp-thumbnail" class="w-8 h-8 rounded-full border-2 border-indigo-400 object-cover" src="https://placehold.co/32x32/1f2937/9ca3af?text=U" alt="Profile Picture">
                 <span class="text-sm font-semibold pr-1">Settings</span>
             </button>
@@ -152,8 +172,42 @@
                 <button id="cancel-server-button" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition duration-150">Cancel</button>
                 <button id="create-server-button" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition duration-150">Create Server</button>
             </div>
+            <p id="server-creation-status" class="mt-4 text-sm font-medium text-red-400"></p>
         </div>
     </div>
+    
+    <!-- Modal for Server Invite/Join -->
+    <div id="invite-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 p-6 rounded-xl w-full max-w-lg shadow-2xl">
+            <h3 class="text-2xl font-bold text-indigo-400 mb-4" id="invite-modal-title">Invite to Server</h3>
+            
+            <div id="invite-link-display" class="bg-gray-900 p-4 rounded-lg mb-4 hidden">
+                <p class="text-sm font-medium text-gray-400 mb-2">Share this link:</p>
+                <div class="flex space-x-2">
+                    <input type="text" id="server-invite-link" class="flex-grow p-2 bg-gray-700 rounded-lg text-sm font-mono text-indigo-300" readonly>
+                    <button id="copy-invite-link" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm">Copy</button>
+                </div>
+            </div>
+            
+            <!-- Join Server Input (for recipients) -->
+            <div id="join-server-input" class="mb-4">
+                <p class="text-sm font-medium text-gray-400 mb-2">Or paste an invite link to join:</p>
+                <input type="text" id="join-invite-link-input" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-600 text-gray-100 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Paste full server invite link here...">
+            </div>
+            
+            <div id="server-preview" class="p-4 bg-gray-700 rounded-lg mb-4 hidden">
+                <h4 class="text-xl font-bold text-indigo-300" id="preview-server-name">Server Name</h4>
+                <p class="text-gray-400 text-sm">Server ID: <span id="preview-server-id" class="font-mono"></span></p>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button id="close-invite-modal-button" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition duration-150">Close</button>
+                <button id="join-server-button" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition duration-150 hidden">Join Server</button>
+            </div>
+            <p id="invite-status" class="mt-4 text-sm font-medium text-red-400"></p>
+        </div>
+    </div>
+
 
     <!-- Settings Modal -->
     <div id="settings-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
@@ -187,7 +241,6 @@
                     <button id="remove-pfp-button" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition duration-150">Remove PFP</button>
                 </div>
                 <p id="pfp-upload-status" class="mt-2 text-sm text-gray-500"></p>
-                <!-- Reuse progress bar from file upload status area but hide the full status block -->
             </div>
 
             <!-- Banner URL Input -->
@@ -215,17 +268,12 @@
         </div>
     </div>
 
-    <!-- Modal for Changelog/Notifications (Hidden for brevity, original logic remains) -->
-    <div id="changelog-modal-bg" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
-        <!-- ... content not visible for this update ... -->
-    </div>
-
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, getDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, getDoc, query, onSnapshot, orderBy, serverTimestamp, setLogLevel, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 // =================================
 // 1. CONFIGURATION (EDIT ME)
@@ -253,13 +301,20 @@ const PLACEHOLDER_APP_ID = 'knokbak-message-panel';
 
 // --- File Upload Configuration ---
 const MAX_FILE_SIZE_MB = 500;
-const UPLOAD_ENDPOINT = "https://school-upload-worker-endpoint.garrett23-main-garrettlol.workers.dev";
+const UPLOAD_ENDPOINT = "https://school-upload-worker-endpoint.garrett23-main-garrettlol.workers.dev/";
 const UPLOAD_AUTH_TOKEN = "Sch00lUpl0ad2025";
 const CDN_BASE_URL = "https://cdna.knokbak.com/downloadable/share/";
 
 // --- Default Profile Images ---
 const DEFAULT_PFP_URL = "https://placehold.co/96x96/1f2937/9ca3af?text=U";
 const DEFAULT_BANNER_URL = "https://placehold.co/800x200/374151/9ca3af?text=BANNER";
+
+// --- Default Emojis (Discord Style) ---
+const DEFAULT_EMOJIS = [
+    '👍', '😂', '🔥', '🎉', '😢', '🥺', '🙏', '❤️', '👀', '🤔', '🥳', '😎',
+    '🤣', '💯', '✅', '✨', '🤯', '😭', '💀', '👽', '🐶', '🐱', '🦄', '🚀',
+    '🍕', '🍔', '🍺', '☕', '🎂', '💰', '💡', '⏰', '🎤', '💻', '💡', '🌟'
+];
 // =================================
 
 
@@ -279,10 +334,14 @@ let currentUserProfile = {
 };
 // Cache to store other users' profile data (PFP/Name)
 let userProfilesCache = {}; 
+let isEmojiPickerOpen = false;
 
-// Changelog/Notification Variables
-let isChangelogOpen = false;
-let newMessageCount = 0;
+// Server State
+let currentServer = {
+    id: 'global', // 'global' is the default public chat
+    name: 'Global Chat',
+    inviteId: null, // Global chat doesn't need an invite ID
+};
 
 
 // 3. ELEMENT REFERENCES
@@ -327,6 +386,28 @@ const logoutButton = document.getElementById('logout-button');
 const addServerButton = document.getElementById('add-server-button');
 const serverModalBg = document.getElementById('server-modal-bg');
 const cancelServerButton = document.getElementById('cancel-server-button');
+const serverCreationStatus = document.getElementById('server-creation-status');
+
+const emojiPickerButton = document.getElementById('emoji-picker-button');
+const emojiPicker = document.getElementById('emoji-picker');
+const emojiList = document.getElementById('emoji-list');
+
+const currentChannelTitle = document.getElementById('current-channel-title');
+const inviteServerButton = document.getElementById('invite-server-button');
+
+const inviteModalBg = document.getElementById('invite-modal-bg');
+const inviteLinkDisplay = document.getElementById('invite-link-display');
+const serverInviteLink = document.getElementById('server-invite-link');
+const copyInviteLink = document.getElementById('copy-invite-link');
+const closeInviteModalButton = document.getElementById('close-invite-modal-button');
+const inviteModalTitle = document.getElementById('invite-modal-title');
+const joinInviteLinkInput = document.getElementById('join-invite-link-input');
+const serverPreview = document.getElementById('server-preview');
+const previewServerName = document.getElementById('preview-server-name');
+const previewServerId = document.getElementById('preview-server-id');
+const joinServerButton = document.getElementById('join-server-button');
+const inviteStatus = document.getElementById('invite-status');
+const joinServerInput = document.getElementById('join-server-input');
 
 
 // 4. UTILITY FUNCTIONS
@@ -339,6 +420,18 @@ function showMessage(message, isError = false) {
             codeError.classList.add('opacity-0');
         }, 5000);
     }
+}
+
+/**
+ * Generates a random alphanumeric string (e.g., for Server IDs or Session IDs).
+ */
+function generateRandomId(length) {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+        result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
 }
 
 /**
@@ -370,7 +463,18 @@ function formatTimestamp(timestamp) {
     });
 }
 
-// 5. PROFILE AND DATA MANAGEMENT
+/**
+ * Generates a full server invite link with a temporary session ID.
+ */
+function generateInviteLink(serverId) {
+    const randomSessionId = generateRandomId(23); // 23-digit random combo
+    // We use a mock base URL as this app runs in a sandbox
+    const baseURL = "https://panel2-useast-dynatest.knokbak.com/server/"; 
+    return `${baseURL}${serverId}?sessionID=${randomSessionId}`;
+}
+
+
+// 5. PROFILE AND DATA MANAGEMENT (CRUD)
 
 /**
  * Fetches the current user's profile data from Firestore.
@@ -383,7 +487,7 @@ async function loadUserProfile(userId) {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
             const data = docSnap.data();
-            console.log("Loaded profile data:", data);
+            console.log("Loaded persistent profile data.");
             
             // Merge loaded data with current profile state
             currentUserProfile = {
@@ -424,7 +528,6 @@ async function saveUserProfile(profile) {
         profileSaveStatus.classList.remove('text-red-400');
         profileSaveStatus.classList.add('text-green-400');
         
-        // Wait 3 seconds, then clear status
         setTimeout(() => {
             profileSaveStatus.textContent = "";
         }, 3000);
@@ -438,29 +541,11 @@ async function saveUserProfile(profile) {
 }
 
 /**
- * Fetches and caches all available user profile data for message rendering.
- * In a real app, this would be scoped to only users in the current channel/server.
- */
-async function cacheAllUserProfiles() {
-    // This is a simplified fetch from the private path of the current user. 
-    // For a multi-user cache, we would need a public 'user_metadata' collection 
-    // accessible to everyone. Since we're restricted to the current user's 
-    // private path and public chat, we'll cache the hardcoded users if possible.
-    
-    // For now, we only cache the current user's profile for local rendering.
-    userProfilesCache[userId] = currentUserProfile;
-}
-
-/**
  * Updates all relevant UI elements (thumbnail, preview, inputs) based on currentUserProfile.
  */
 function updateProfileUI() {
     const { displayName, pfpUrl, bannerUrl, accessCode } = currentUserProfile;
     
-    // Chat input name (if not using the settings modal's input)
-    // We'll use the profileNameInput in the settings modal to manage this.
-
-    // Thumbnail and Previews
     pfpThumbnail.src = pfpUrl;
     pfpPreview.src = pfpUrl;
     bannerPreview.src = bannerUrl;
@@ -473,12 +558,77 @@ function updateProfileUI() {
     displayAccessCode.textContent = accessCode || '***********';
 }
 
+/**
+ * Creates a new server document in Firestore's public space.
+ */
+async function createNewServer(serverName) {
+    const serversCollectionPath = `/artifacts/${currentAppId}/public/data/servers`;
+    const serversRef = collection(db, serversCollectionPath);
+    
+    try {
+        const newServerRef = doc(serversRef); // Get a new DocRef to generate ID
+        const serverId = newServerRef.id;
+        
+        await setDoc(newServerRef, {
+            name: serverName,
+            ownerId: userId,
+            ownerName: currentUserProfile.displayName,
+            members: [userId], // Add creator as the first member
+            createdAt: serverTimestamp(),
+            // The permanent invite link base is the Server ID itself
+            inviteId: serverId, 
+        });
+
+        // Update status UI
+        serverCreationStatus.textContent = `Server "${serverName}" created successfully! Invite ID: ${serverId}`;
+        serverCreationStatus.classList.remove('text-red-400');
+        serverCreationStatus.classList.add('text-green-400');
+        
+        // Automatically switch to the new server (Placeholder: just update status)
+        console.log(`Server ${serverName} created with ID ${serverId}`);
+        
+        setTimeout(() => {
+            serverModalBg.style.display = 'none';
+            serverCreationStatus.textContent = '';
+            document.getElementById('server-name-input').value = '';
+            // For now, switch back to global chat view
+            currentServer = { id: 'global', name: 'Global Chat', inviteId: null };
+            updateChannelUI();
+        }, 2000);
+
+    } catch (e) {
+        console.error("Error creating server:", e);
+        serverCreationStatus.textContent = `Failed to create server: ${e.message}`;
+        serverCreationStatus.classList.remove('text-green-400');
+        serverCreationStatus.classList.add('text-red-400');
+    }
+}
+
+/**
+ * Fetches a server by its permanent invite ID.
+ */
+async function getServerByInviteId(inviteId) {
+    const serversCollectionPath = `/artifacts/${currentAppId}/public/data/servers`;
+    const serversRef = collection(db, serversCollectionPath);
+    
+    // Query requires an index, which we can't guarantee. We will query all and filter client side for simplicity.
+    // In a production app, we would use a query with a 'where' clause on inviteId.
+    try {
+        const snapshot = await getDocs(serversRef);
+        const servers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        return servers.find(server => server.inviteId === inviteId);
+        
+    } catch (e) {
+        console.error("Error fetching servers:", e);
+        return null;
+    }
+}
+
 
 // 6. INITIALIZATION & AUTHENTICATION
 
 // Initialize Firebase
 async function initializeFirebase() {
-    // ... (Configuration remains the same) ...
     let config = PLACEHOLDER_FIREBASE_CONFIG;
     let appId = PLACEHOLDER_APP_ID;
     if (typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0) {
@@ -536,7 +686,7 @@ async function validateCode(code) {
         "5815287646": "Garrett",
         "0269927548": "Isaac",
         "7950368985": "Amir",
-        
+    
     };
     
     const isValid = ACCESS_CODES.includes(codeInput) || Object.keys(validNames).includes(codeInput);
@@ -571,13 +721,23 @@ async function validateCode(code) {
 
 // 7. FILE UPLOAD LOGIC (REUSED/MODIFIED)
 
+function clearAttachedFile() {
+    attachedFile = null;
+    uploadedFileUrl = null;
+    fileInput.value = '';
+    fileStatusAndProgress.classList.add('hidden');
+    progressBarFill.style.width = '0%';
+    fileNameDisplay.className = 'text-sm text-gray-300 font-medium truncate mb-1';
+    fileNameDisplay.textContent = '';
+}
+
 // Reuses the file upload logic for both message attachments and PFP/Banner uploads
 async function uploadFile(file, isPfp = false) {
     const formData = new FormData();
     formData.append('file', file);
     
     const statusElement = isPfp ? pfpUploadStatus : fileNameDisplay;
-    const progressFillElement = isPfp ? progressBarFill : progressBarFill; // Reusing the same bar for PFP status
+    const progressFillElement = isPfp ? progressBarFill : progressBarFill; 
 
     // START: Loading/Progress State
     if (!isPfp) {
@@ -608,16 +768,19 @@ async function uploadFile(file, isPfp = false) {
         statusElement.textContent = `Upload Complete: ${file.name}`;
         statusElement.className = isPfp ? 'mt-2 text-sm text-green-400' : 'text-green-400';
         
+        // Get the full public URL from the CDN base
+        const fullUrl = `${CDN_BASE_URL}${result.url}`;
+
         setTimeout(() => {
             if (!isPfp) {
                  uploadProgressBar.classList.add('hidden');
                  fileStatusAndProgress.classList.add('hidden'); 
             } else {
-                statusElement.textContent = '';
+                statusElement.textContent = `Upload successful. Click 'Save Profile Changes'.`;
             }
         }, 1500);
 
-        return result.url; 
+        return fullUrl; 
 
     } catch (error) {
         if (!isPfp) {
@@ -635,17 +798,6 @@ async function uploadFile(file, isPfp = false) {
 
 // 8. CHAT & MESSAGE LOGIC
 
-function clearAttachedFile() {
-    attachedFile = null;
-    uploadedFileUrl = null;
-    fileInput.value = '';
-    fileStatusAndProgress.classList.add('hidden');
-    progressBarFill.style.width = '0%';
-    fileNameDisplay.className = 'text-sm text-gray-300 font-medium truncate mb-1';
-    fileNameDisplay.textContent = '';
-}
-
-// Creates a media embed/link based on file type
 function createAttachmentHTML(url) {
     if (!url) return '';
     const fileExtension = url.split('.').pop().toLowerCase();
@@ -660,12 +812,9 @@ function createAttachmentHTML(url) {
     return `<div class="bg-gray-800 p-2 rounded-lg border border-gray-700 mt-2">${mediaHTML}</div>`;
 }
 
-
-// Creates a message bubble HTML element, now with PFP and improved time format
 function createMessageElement(data) {
     const isSelf = data.senderId === userId;
     const time = formatTimestamp(data.timestamp);
-    const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
 
     // Use current user's profile for their messages, otherwise a placeholder
     const profile = isSelf ? currentUserProfile : (userProfilesCache[data.senderId] || { 
@@ -673,9 +822,11 @@ function createMessageElement(data) {
         pfpUrl: DEFAULT_PFP_URL 
     });
 
-    const pfp = profile.pfpUrl;
+    // We'll trust the stored PFP URL in Firestore for the message sender.
+    const pfp = data.pfpUrl || profile.pfpUrl; 
     const displayName = profile.displayName;
-    const nameColor = 'text-indigo-400'; // Uniform color for name
+    const nameColor = 'text-indigo-400'; 
+    const attachmentHTML = createAttachmentHTML(data.attachmentUrl);
 
     const div = document.createElement('div');
     div.className = `flex ${isSelf ? 'justify-end' : 'justify-start'} w-full`;
@@ -694,8 +845,22 @@ function createMessageElement(data) {
 }
 
 
+// Updates the header title based on the current server/channel
+function updateChannelUI() {
+    currentChannelTitle.textContent = `# ${currentServer.name}`;
+    // Show invite button only if we are in a custom server (not 'global')
+    if (currentServer.id !== 'global' && currentServer.inviteId) {
+        inviteServerButton.classList.remove('hidden');
+    } else {
+        inviteServerButton.classList.add('hidden');
+    }
+    // Future: Clear and reload message listener for the new channel
+}
+
+
 // Listens for real-time messages from Firestore
 function listenForMessages() {
+    // Current logic points to the public global chat
     const messagesCollectionPath = `/artifacts/${currentAppId}/public/data/messages`;
     const messagesQuery = query(collection(db, messagesCollectionPath), orderBy('timestamp'));
 
@@ -764,7 +929,9 @@ async function sendMessage() {
             timestamp: serverTimestamp(),
             senderName: senderName,
             senderId: userId,
-            attachmentUrl: uploadedFileUrl
+            attachmentUrl: uploadedFileUrl,
+            // Include PFP URL in the message for consistent historical display
+            pfpUrl: currentUserProfile.pfpUrl 
         });
         
         // Post to Discord (webhook) - Non-blocking
@@ -786,6 +953,7 @@ async function sendMessage() {
     }
 }
 
+
 // 9. EVENT LISTENERS
 
 // --- Chat Input ---
@@ -802,6 +970,7 @@ messageInput.addEventListener('input', () => {
     messageInput.style.height = messageInput.scrollHeight + 'px';
 });
 
+// --- File Handling ---
 selectFileButton.addEventListener('click', () => fileInput.click());
 clearFileButton.addEventListener('click', clearAttachedFile);
 
@@ -824,6 +993,30 @@ fileInput.addEventListener('change', (e) => {
     showMessage(`File selected: ${file.name}`);
 });
 
+// --- Emoji Picker ---
+
+function toggleEmojiPicker() {
+    isEmojiPickerOpen = !isEmojiPickerOpen;
+    emojiPicker.style.display = isEmojiPickerOpen ? 'flex' : 'none';
+}
+
+function initEmojiPicker() {
+    DEFAULT_EMOJIS.forEach(emoji => {
+        const span = document.createElement('span');
+        span.textContent = emoji;
+        span.className = 'text-2xl cursor-pointer hover:bg-gray-700 p-1 rounded-md transition duration-100 flex items-center justify-center';
+        span.addEventListener('click', () => {
+            messageInput.value += emoji;
+            messageInput.focus();
+            toggleEmojiPicker();
+        });
+        emojiList.appendChild(span);
+    });
+}
+
+emojiPickerButton.addEventListener('click', toggleEmojiPicker);
+
+
 // --- Server Creation Modal ---
 addServerButton.addEventListener('click', () => {
     serverModalBg.style.display = 'flex';
@@ -831,24 +1024,107 @@ addServerButton.addEventListener('click', () => {
 
 cancelServerButton.addEventListener('click', () => {
     serverModalBg.style.display = 'none';
+    serverCreationStatus.textContent = '';
+    document.getElementById('server-name-input').value = '';
 });
 
-// Create Server Button (Placeholder)
+// Create Server Button Logic
 document.getElementById('create-server-button').addEventListener('click', () => {
     const serverName = document.getElementById('server-name-input').value.trim();
     if (serverName) {
-        showMessage(`Feature coming soon: Created server "${serverName}"!`, false);
-        serverModalBg.style.display = 'none';
-        document.getElementById('server-name-input').value = '';
+        createNewServer(serverName);
     } else {
-        showMessage("Server name cannot be empty.", true);
+        serverCreationStatus.textContent = "Server name cannot be empty.";
+        serverCreationStatus.classList.add('text-red-400');
     }
+});
+
+// --- Server Invite/Join Modal ---
+
+inviteServerButton.addEventListener('click', () => {
+    inviteModalTitle.textContent = `Invite to ${currentServer.name}`;
+    inviteLinkDisplay.classList.remove('hidden');
+    joinServerInput.classList.add('hidden');
+    joinServerButton.classList.add('hidden');
+    serverPreview.classList.add('hidden');
+    inviteStatus.textContent = '';
+    
+    // Generate the invite link for the current server
+    const link = generateInviteLink(currentServer.id);
+    serverInviteLink.value = link;
+    
+    inviteModalBg.style.display = 'flex';
+});
+
+// Handler for the Join Server input field
+joinInviteLinkInput.addEventListener('input', async (e) => {
+    const fullLink = e.target.value.trim();
+    inviteStatus.textContent = '';
+    serverPreview.classList.add('hidden');
+    joinServerButton.classList.add('hidden');
+
+    // Extract the server ID (the 15-25 digit alphanumeric string after /server/)
+    // This regex looks for: /server/ followed by 10 to 30 alphanumeric characters
+    const match = fullLink.match(/\/server\/([a-zA-Z0-9]{10,30})\?sessionID=/);
+    
+    if (match && match[1]) {
+        const permanentServerId = match[1];
+        
+        // 1. Fetch server data using the permanent ID
+        const serverData = await getServerByInviteId(permanentServerId);
+
+        if (serverData) {
+            previewServerName.textContent = serverData.name;
+            previewServerId.textContent = serverData.inviteId;
+            serverPreview.classList.remove('hidden');
+            joinServerButton.classList.remove('hidden');
+            inviteStatus.textContent = 'Server found! Click Join to enter.';
+            inviteStatus.classList.remove('text-red-400');
+            inviteStatus.classList.add('text-green-400');
+            joinServerButton.dataset.serverId = serverData.id; // Store ID for join action
+        } else {
+            inviteStatus.textContent = 'Error: Invite link is valid but server was not found or has been deleted.';
+            inviteStatus.classList.add('text-red-400');
+        }
+
+    } else if (fullLink.length > 0) {
+        inviteStatus.textContent = 'Invalid link format. Must contain "/server/{id}?sessionID={...}"';
+        inviteStatus.classList.add('text-red-400');
+    }
+});
+
+// Join Server Action (Placeholder)
+joinServerButton.addEventListener('click', (e) => {
+    const serverIdToJoin = e.target.dataset.serverId;
+    if (serverIdToJoin) {
+        inviteStatus.textContent = `Joined server with ID: ${serverIdToJoin}! (Placeholder action)`;
+        inviteStatus.classList.add('text-green-400');
+        
+        // Placeholder: in a real app, this would update member list and switch views
+        setTimeout(() => {
+            inviteModalBg.style.display = 'none';
+        }, 1500);
+    }
+});
+
+
+closeInviteModalButton.addEventListener('click', () => {
+    inviteModalBg.style.display = 'none';
+    joinInviteLinkInput.value = '';
+    inviteStatus.textContent = '';
+    serverPreview.classList.add('hidden');
+});
+
+copyInviteLink.addEventListener('click', () => {
+    serverInviteLink.select();
+    document.execCommand('copy');
+    copyInviteLink.textContent = 'Copied!';
+    setTimeout(() => copyInviteLink.textContent = 'Copy', 1500);
 });
 
 // --- Settings Modal ---
 
 settingsButton.addEventListener('click', () => {
-    // Populate modal inputs with current state before opening
     updateProfileUI(); 
     settingsModalBg.style.display = 'flex';
 });
@@ -890,17 +1166,21 @@ removePfpButton.addEventListener('click', () => {
     pfpUploadStatus.classList.add('text-green-400');
 });
 
+// Banner URL Live Preview
+bannerUrlInput.addEventListener('input', () => {
+    // Check if the URL is non-empty before updating the preview
+    const url = bannerUrlInput.value.trim();
+    bannerPreview.src = url || DEFAULT_BANNER_URL;
+});
+
 // Save Profile Button
 saveProfileButton.addEventListener('click', async () => {
     const newProfile = {
         accessCode: currentUserProfile.accessCode,
         displayName: profileNameInput.value.trim() || 'Anonymous',
-        pfpUrl: currentUserProfile.pfpUrl, // Use the URL from the last upload/state
+        pfpUrl: currentUserProfile.pfpUrl, 
         bannerUrl: bannerUrlInput.value.trim() || DEFAULT_BANNER_URL
     };
-    
-    // Update PFP preview live (in case only banner URL or name changed)
-    bannerPreview.src = newProfile.bannerUrl;
     
     await saveUserProfile(newProfile);
 });
@@ -921,7 +1201,6 @@ toggleCodeButton.addEventListener('click', () => {
 
 // Log Out (Clears session)
 logoutButton.addEventListener('click', () => {
-    // Simple log out: refresh the page to force re-authentication
     location.reload();
 });
 
@@ -936,15 +1215,13 @@ async function postToDiscord(message, senderName, attachmentUrl = null) {
     const payload = {
         content: message,
         username: senderName,
-        avatar_url: currentUserProfile.pfpUrl, // Use set PFP
+        avatar_url: currentUserProfile.pfpUrl, 
         embeds: attachmentUrl ? [{ title: "File Attachment", url: attachmentUrl }] : []
     };
     
-    // Only send attachment link in content if there's no text message
     if (message.trim() === "" && attachmentUrl) {
          payload.content = attachmentUrl;
     } else if (message.trim() !== "" && attachmentUrl) {
-        // Append link to content if there's text
         payload.content += `\n\n[Attachment Link](${attachmentUrl})`;
     }
 
@@ -963,6 +1240,9 @@ async function postToDiscord(message, senderName, attachmentUrl = null) {
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
+    initEmojiPicker(); // Initialize the emoji picker on load
+    updateChannelUI(); // Set initial channel title
+
     if (await initializeFirebase()) {
         enterCodeButton.addEventListener('click', () => validateCode(accessCodeInput.value));
         accessCodeInput.addEventListener('keypress', (e) => {
