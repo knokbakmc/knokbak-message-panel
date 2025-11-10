@@ -10,12 +10,12 @@
         // This is used if the environment variable is missing. 
         // You can change these values to point to your own Firebase project.
         const defaultFirebaseConfig = {
-            apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
-            authDomain: "knokbak-message-panel.firebaseapp.com",
-            projectId: "knokbak-message-panel",
-            storageBucket: "knokbak-message-panel.firebasestorage.app",
-            messagingSenderId: "424259711684",
-            appId: "1:424259711684:web:6818525d64024815604f91",
+            apiKey: "AIzaSyC_YourDefaultApiKeyGoesHere_DoNotShareInPublic", 
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef1234567890"
         };
         // -----------------------------------------
 
@@ -97,7 +97,7 @@
                         currentUserId = user.uid;
                         isAdmin = currentUserId === ADMIN_ID;
                         document.getElementById('loading-status').textContent = "Authenticated successfully. Loading profile...";
-                        handleSuccessfulAuth();
+                        handleSuccessfulAuth(true); // Call with true to indicate full auth flow
                     } else {
                         currentUserId = null;
                         document.getElementById('loading-status').textContent = "Signed out. Enter your code to continue.";
@@ -124,9 +124,13 @@
             document.getElementById('members-panel').classList.add('hidden');
         }
 
-        async function handleSuccessfulAuth() {
-            // Fetch or create user profile data
-            await fetchUserProfile();
+        // Added parameter to distinguish between initial full auth and simple re-enable
+        async function handleSuccessfulAuth(fullAuth = false) {
+            // Only fetch profile if it's the initial full authentication flow
+            if (fullAuth) {
+                 // Fetch or create user profile data
+                await fetchUserProfile();
+            }
             
             // UI transitions
             document.getElementById('code-screen').style.opacity = '0';
@@ -606,23 +610,18 @@
                     return;
                 }
                 
-                // On re-entry (after forced logout), we check if the entered code belongs to the current UID
-                if (!currentUserId) {
-                    // Try to find the user ID associated with the code
-                    const codeSnap = await getDoc(doc(db, CODES_COLLECTION_PATH, codeInput));
-                    if (codeSnap.exists() && isAuthReady) {
-                        // We found a matching code, but we can't directly sign in as them.
-                        // For this environment, we rely on the initial token. We can only "re-enable" the UI.
-                        errorDiv.textContent = "Login successful. UI re-enabled.";
-                        errorDiv.classList.remove('opacity-0');
-                        handleSuccessfulAuth(); // Re-show UI
-                    } else {
-                        errorDiv.textContent = "Invalid Code or Authentication Still Loading.";
-                        errorDiv.classList.remove('opacity-0');
-                    }
+                // Try to find the user ID associated with the code
+                const codeSnap = await getDoc(doc(db, CODES_COLLECTION_PATH, codeInput));
+                if (codeSnap.exists() && isAuthReady) {
+                    // We found a matching code. In this environment, we can't switch users, 
+                    // so we just re-enable the UI if the code is valid.
+                    errorDiv.textContent = "Login successful. UI re-enabled.";
+                    errorDiv.classList.remove('opacity-0');
+                    // **FIX**: Always call handleSuccessfulAuth to transition UI if the code is valid.
+                    handleSuccessfulAuth(); 
                 } else {
-                    // If we're already logged in (shouldn't happen, but just in case), proceed.
-                     handleSuccessfulAuth();
+                    errorDiv.textContent = "Invalid Code or Authentication Still Loading.";
+                    errorDiv.classList.remove('opacity-0');
                 }
             });
             
@@ -837,7 +836,7 @@
 
         }); // DOMContentLoaded end
         
-        // --- Global Message/Modal Box (Omitted for brevity) ---
+        // --- Global Message/Modal Box (Alert/Confirmation) ---
         
         let messageBoxTimeout;
         function showMessageBox(message, isError = false, onConfirm = null, requiresConfirm = false) {
