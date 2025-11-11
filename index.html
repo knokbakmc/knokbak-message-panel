@@ -50,8 +50,8 @@
     <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- ENVIRONMENT/HARDCODED CONFIGURATION ---
         const hardcodedFirebaseConfig = {
@@ -99,9 +99,9 @@
         ];
 
         // --- FIREBASE COLLECTION PATHS ---
+        // Note: Access codes are used as the User ID (UID)
         const USERS_COLLECTION = `/artifacts/${appId}/public/data/users`;
         const PUBLIC_MESSAGES_COLLECTION = `/artifacts/${appId}/public/data/messages`;
-        // DM messages will live in a subcollection under a dedicated DM collection
         const DMS_COLLECTION = `/artifacts/${appId}/public/data/dms`; 
 
         // --- UTILITY FUNCTIONS ---
@@ -135,7 +135,6 @@
                       .replace(/'/g, '&#039;');
         }
         
-        // Generates a unique, sorted conversation ID for DMs
         function getDmConversationId(userId1, userId2) {
             return [userId1, userId2].sort().join('_');
         }
@@ -148,43 +147,95 @@
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-
-                await setPersistence(auth, browserSessionPersistence);
                 
-                updateLoadingStatus("Signing in anonymously...");
-
-                // Use the environment token if available for sign-in
+                // If there's a pre-provided token from the environment, use it.
                 if (initialAuthToken) {
-                    // Note: signInWithCustomToken is not available in the public firebasejs CDN in this format.
-                    // Sticking to signInAnonymously for guaranteed functionality in the current environment.
-                    await signInAnonymously(auth);
-                } else if (!auth.currentUser) {
-                    await signInAnonymously(auth);
+                    updateLoadingStatus("Using environment token for sign-in...");
+                    await signInWithCustomToken(auth, initialAuthToken);
                 }
 
+                // Listen for any auth state change (token sign-in or custom sign-in)
                 onAuthStateChanged(auth, (user) => {
                     isAuthReady = true;
                     if (user) {
                         currentUserId = user.uid;
+                        // Hide login, show loading, then proceed to app setup
+                        document.getElementById('login-screen').classList.add('hidden');
+                        document.getElementById('loading-overlay').classList.remove('hidden');
+                        updateLoadingStatus("User authenticated. Setting up profile...");
                         handleSuccessfulAuth(); 
                     } else {
+                        // No user, show the login screen
                         currentUserId = null;
-                        updateLoadingStatus("Authentication Failed. Please refresh.");
+                        document.getElementById('loading-overlay').classList.add('hidden');
+                        document.getElementById('login-screen').classList.remove('hidden');
+                        updateLoadingStatus("Please enter your Access Code.");
                     }
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
-                updateLoadingStatus(`Initialization Error: ${error.message}`);
-                showMessageBox("Error", `Firebase init failed: ${error.message}`, 8000, 'bg-red-500');
+                document.getElementById('login-error').textContent = `Initialization failed: ${error.message}`;
+                document.getElementById('login-screen').classList.remove('hidden');
+            }
+        }
+        
+        window.handleLogin = async function() {
+            const codeInput = document.getElementById('access-code-input');
+            const code = codeInput.value.trim();
+            const errorText = document.getElementById('login-error');
+            errorText.textContent = '';
+            
+            if (code.length !== 10 || isNaN(code)) {
+                errorText.textContent = 'Access Code must be 10 numeric digits.';
+                return;
+            }
+
+            document.getElementById('login-button').disabled = true;
+            document.getElementById('login-button').textContent = 'Logging In...';
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            updateLoadingStatus("Authenticating with server...");
+
+            try {
+                // Fetch a Custom Token from an external service (or mock token generation)
+                // Since we cannot run an actual server, we will **MOCK** the token generation 
+                // and use the code as the UID to simulate successful custom sign-in.
+                
+                // NOTE: In a real app, this would be a network call:
+                // const tokenResponse = await fetch('/generateCustomToken', { method: 'POST', body: JSON.stringify({ code }) });
+                // const { customToken } = await tokenResponse.json();
+                
+                // For this environment, we simulate success and rely on the platform's ability
+                // to authenticate based on the UID/Code.
+                
+                const customToken = initialAuthToken || 'mock-token-' + code; // Must use a real token in production
+
+                // Since we rely on the platform for token exchange, we only proceed to profile setup.
+                // If the user's UID already exists, it will be automatically signed in via onAuthStateChanged.
+                // For now, we will assume successful authentication based on the code/UID.
+                
+                // We will rely on onAuthStateChanged to pick up the user when the platform authenticates it.
+                // We directly attempt profile setup based on the code/UID.
+                await createOrFetchUserProfile(code);
+                
+            } catch (error) {
+                console.error("Login failed:", error);
+                errorText.textContent = `Login Failed: ${error.message}. Please try again.`;
+                document.getElementById('login-button').disabled = false;
+                document.getElementById('login-button').textContent = 'ENTER';
+                document.getElementById('loading-overlay').classList.add('hidden');
+                document.getElementById('login-screen').classList.remove('hidden');
             }
         }
 
-        async function createOrFetchUserProfile() {
-            if (!currentUserId || !db) return false;
+
+        async function createOrFetchUserProfile(uid) {
+            if (!uid || !db) return false;
             
+            currentUserId = uid; // Set the UID temporarily for profile check
             updateLoadingStatus("Fetching user profile...");
 
-            const userDocRef = doc(db, USERS_COLLECTION, currentUserId);
+            const userDocRef = doc(db, USERS_COLLECTION, uid);
             try {
                 const docSnap = await getDoc(userDocRef);
                 
@@ -192,18 +243,19 @@
                     currentUserData = docSnap.data();
                     isAdmin = currentUserData.isAdmin || false;
                 } else {
-                    // Create a new, unique profile for the anonymous user
-                    const tag = Math.floor(1000 + Math.random() * 9000).toString();
+                    // This is a new user/code. Set up a basic profile.
                     const newProfile = {
-                        userId: currentUserId,
-                        username: `Anon${tag}`,
-                        tag: tag,
-                        pfpUrl: `https://placehold.co/80x80/${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}/ffffff?text=${tag}`,
+                        userId: uid,
+                        username: `User-${uid.substring(uid.length - 4)}`,
+                        tag: uid.substring(uid.length - 4),
+                        pfpUrl: `https://placehold.co/80x80/${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}/ffffff?text=${uid.substring(uid.length - 4)}`,
                         isAdmin: false, 
-                        isAnonymous: true
+                        isAnonymous: false,
+                        accessCode: uid // Store the code as the access identifier
                     };
                     await setDoc(userDocRef, newProfile);
                     currentUserData = newProfile;
+                    showMessageBox("Welcome!", "New profile created based on your access code.", 4000, 'bg-green-600');
                 }
                 
                 // Update last online timestamp and set online flag
@@ -215,32 +267,30 @@
                     setDoc(userDocRef, { lastOnline: serverTimestamp(), isOnline: true }, { merge: true });
                 });
                 
+                // Finalize setup
+                handleSuccessfulAuth(); 
                 return true;
             } catch (e) {
                 console.error("Error creating/fetching profile:", e);
                 updateLoadingStatus(`Profile Error: ${e.message}`);
                 showMessageBox("Profile Error", "Could not access user profiles. Check Firestore rules.", 8000, 'bg-red-700');
+                document.getElementById('loading-overlay').classList.add('hidden');
+                document.getElementById('login-screen').classList.remove('hidden');
                 return false;
             }
         }
 
         async function handleSuccessfulAuth() {
-            if (!currentUserId) return;
-
-            const profileReady = await createOrFetchUserProfile();
+            if (!currentUserId || !currentUserData) return;
             
-            if (profileReady && currentUserData) {
-                updateLoadingStatus("Profile loaded. Starting chat listeners...");
-                document.getElementById('loading-overlay').classList.add('hidden');
-                document.getElementById('app-container').classList.remove('hidden');
-                setupGlobalListeners();
-                updateProfileDisplay();
-                // Start with the default channel
-                switchChannel(activeChannelId); 
-                document.getElementById('channel-title').textContent = PUBLIC_CHANNELS.find(c => c.id === activeChannelId).name;
-            } else {
-                 updateLoadingStatus("Could not load profile. Please check Firestore permissions.");
-            }
+            updateLoadingStatus("Profile loaded. Starting chat listeners...");
+            document.getElementById('loading-overlay').classList.add('hidden');
+            document.getElementById('app-container').classList.remove('hidden');
+            setupGlobalListeners();
+            updateProfileDisplay();
+            // Start with the default channel
+            switchChannel(activeChannelId); 
+            document.getElementById('channel-title').textContent = PUBLIC_CHANNELS.find(c => c.id === activeChannelId).name;
         }
         
         // --- GLOBAL LISTENERS (Users) ---
@@ -339,8 +389,6 @@
             document.getElementById('chat-box').innerHTML = '<div class="text-center text-gray-500 py-4">Loading messages...</div>';
 
             const messagesRef = collection(db, PUBLIC_MESSAGES_COLLECTION);
-            // Note: Cannot use orderBy('timestamp') directly without a Firestore index.
-            // Fetching without order and sorting client-side is safer for a quick app.
             const messagesQuery = query(messagesRef, where('channelId', '==', channelId));
 
             unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
@@ -365,7 +413,6 @@
             // DM messages are stored as a subcollection under a unique document ID
             const dmMessagesRef = collection(db, DMS_COLLECTION, chatId, 'messages');
 
-            // Fetching without order, sorting client-side
             const dmQuery = query(dmMessagesRef);
 
             unsubscribeMessages = onSnapshot(dmQuery, (snapshot) => {
@@ -557,7 +604,7 @@
                     </div>
                 </div>
                 <div class="text-xs text-gray-500 mt-2 p-1 bg-gray-700/50 rounded-md break-all">
-                    UID: ${currentUserId}
+                    Access Code (UID): ${currentUserId}
                 </div>
             `;
         }
@@ -648,7 +695,26 @@
         window.onload = initFirebase;
     </script>
 
-    <!-- Chat Application Layout -->
+    <!-- Login Screen -->
+    <div id="login-screen" class="fixed inset-0 flex flex-col items-center justify-center bg-gray-900 z-50 p-6 hidden">
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700 text-center">
+            <h1 class="text-3xl font-extrabold text-primary mb-4">Welcome to School Chat</h1>
+            <p class="text-gray-400 mb-6">Enter your **10-digit Access Code** to join or re-enable chat.</p>
+            
+            <input type="number" id="access-code-input" placeholder="Enter 10-digit Code" 
+                   class="w-full p-3 mb-4 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary text-center text-xl tracking-widest"
+                   maxlength="10" oninput="if(this.value.length>this.maxLength)this.value=this.value.slice(0,this.maxLength)">
+            
+            <button id="login-button" onclick="handleLogin()"
+                    class="w-full bg-primary hover:bg-secondary text-white font-bold py-3 rounded-xl transition-all duration-200 transform hover:scale-[1.01]">
+                ENTER
+            </button>
+            
+            <p id="login-error" class="text-red-500 text-sm mt-4"></p>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
     <div id="loading-overlay" class="fixed inset-0 flex flex-col items-center justify-center bg-gray-900 z-50 transition-opacity duration-500">
         <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-700 h-12 w-12 mb-4"></div>
         <p id="loading-status" class="text-gray-400">Initializing Firebase...</p>
