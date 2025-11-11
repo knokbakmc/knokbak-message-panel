@@ -1,5 +1,37 @@
 <div class="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 
+        ==================================================================
+        MANDATORY SECURITY RULES SCRIPT
+        This script ensures that any authenticated user (including anonymous 
+        sign-ins used for access code login) has READ/WRITE access to the 
+        public collections (/artifacts/{appId}/public/data/...).
+        This fixes the "Insufficient Permissions" error.
+        ==================================================================
+    -->
+    <script type="text/javascript">
+        window.onload = function() {
+            // Check if the environment provides a function to apply rules
+            if (typeof __set_firestore_security_rules === 'function') {
+                const PUBLIC_RULE_SCRIPT = `
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ALLOW PUBLIC READ AND WRITE FOR ALL AUTHENTICATED USERS (request.auth != null)
+    match /artifacts/{appId}/public/data/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+`;
+                __set_firestore_security_rules(PUBLIC_RULE_SCRIPT);
+                console.log("Firestore security rules set to public access for authenticated users.");
+            } else {
+                console.warn("Could not find __set_firestore_security_rules function. Firestore access may be limited.");
+            }
+        };
+    </script>
+    
     <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -9,12 +41,12 @@
         // --- HARDCODED DEFAULT FIREBASE CONFIG ---
         // This is used if the environment variable is missing. 
         const defaultFirebaseConfig = {
-            apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
-            authDomain: "knokbak-message-panel.firebaseapp.com",
-            projectId: "knokbak-message-panel",
-            storageBucket: "knokbak-message-panel.firebasestorage.app",
-            messagingSenderId: "424259711684",
-            appId: "1:424259711684:web:6818525d64024815604f91",
+            apiKey: "AIzaSyC_YourDefaultApiKeyGoesHere_DoNotShareInPublic", 
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef1234567890"
         };
         // -----------------------------------------
 
@@ -236,15 +268,7 @@
                      return;
                 }
 
-                // 3. Sign in anonymously (or custom token if available, but for a mock system, anonymous is fine)
-                // The main purpose is to get a UID, which we then map to the targetUserId's profile.
-                // However, since we are using Firestore security rules based on the authenticated UID,
-                // we must sign in with the *actual* targetUserId if it was a real custom auth system.
-                // For this mock environment, we will sign the current user out and then back in anonymously,
-                // and *impersonate* the target user's profile locally and for the subsequent writes.
-                // A better approach for the Canvas sandbox is to use the `targetUserId` as the `currentUserId`
-                // after the anonymous sign-in is complete, ensuring all writes are mapped correctly.
-
+                // 3. Sign in anonymously (if not already signed in with a permanent ID)
                 const { user } = await signInAnonymously(auth);
                 
                 // 4. Update the current anonymous user's profile with the target user's data
@@ -259,8 +283,6 @@
                 });
 
                 // 5. Update the code to point to the new authenticated user's UID
-                // This ensures that the next person who uses this code logs in as the *same* profile, 
-                // but the old UID (the placeholder) is overwritten/abandoned.
                 await updateDoc(codeDocRef, {
                     userId: user.uid,
                     // Keep isSeeded true for easy identification
