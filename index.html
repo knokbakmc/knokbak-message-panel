@@ -1,55 +1,22 @@
 <div class="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- 
-        ==================================================================
-        MANDATORY SECURITY RULES SCRIPT
-        This script ensures that any authenticated user (including anonymous 
-        sign-ins used for access code login) has READ/WRITE access to the 
-        public collections (/artifacts/{appId}/public/data/...).
-        This fixes the "Insufficient Permissions" error.
-        ==================================================================
-    -->
-    <script type="text/javascript">
-        window.onload = function() {
-            // Check if the environment provides a function to apply rules
-            if (typeof __set_firestore_security_rules === 'function') {
-                const PUBLIC_RULE_SCRIPT = `
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // ALLOW PUBLIC READ AND WRITE FOR ALL AUTHENTICATED USERS (request.auth != null)
-    match /artifacts/{appId}/public/data/{document=**} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-`;
-                __set_firestore_security_rules(PUBLIC_RULE_SCRIPT);
-                console.log("Firestore security rules set to public access for authenticated users.");
-            } else {
-                console.warn("Could not find __set_firestore_security_rules function. Firestore access may be limited.");
-            }
-        };
-    </script>
-    
     <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- HARDCODED DEFAULT FIREBASE CONFIG ---
-        // This is used if the environment variable is missing. 
         const defaultFirebaseConfig = {
             apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc", 
             authDomain: "knokbak-message-panel.firebaseapp.com",
             projectId: "knokbak-message-panel",
             storageBucket: "knokbak-message-panel.firebasestorage.app",
-            messagingSenderId: "4774321694424259711684",
-            appId: "1:424259711684:web:6818525d64024815604f91",
+            messagingSenderId: "424259711684",
+            appId: "1:424259711684:web:6818525d64024815604f91"
         };
-        // -----------------------------------------
-
+        
         // Global Variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         
@@ -71,27 +38,17 @@ service cloud.firestore {
         let auth;
         let currentUserId = null;
         let currentUserData = null; // Stores user profile data
-        let currentServerId = 'global'; // Start on 'global'
+        let currentServerId = 'global'; 
         let unsubscribeMessages = null;
         let unsubscribeUsers = null;
         let isAdmin = false;
         let isAuthReady = false;
 
-        // NOTE: Garrett is now the Admin based on the code you provided (5815287646)
         const ADMIN_ID = "5815287646"; 
-        const ADMIN_PASSWORD = "mysubsarethebest";
         const MESSAGES_COLLECTION_PATH = `/artifacts/${appId}/public/data/messages`;
         const USERS_COLLECTION_PATH = `/artifacts/${appId}/public/data/users`;
-        const CODES_COLLECTION_PATH = `/artifacts/${appId}/public/data/codes`; 
-        
-        // --- SEEDED PROFILE DATA (UPDATED WITH NEW CODES) ---
-        const SEEDED_PROFILES = [
-            { username: "David", tag: "1001", accessCode: "2879556054", pfpUrl: "https://placehold.co/80x80/2563EB/ffffff?text=D" },
-            { username: "Amir", tag: "1002", accessCode: "4774321694", pfpUrl: "https://placehold.co/80x80/059669/ffffff?text=A" },
-            { username: "Camden", tag: "1003", accessCode: "0009029674", pfpUrl: "https://placehold.co/80x80/9333EA/ffffff?text=C" },
-            { username: "Garrett", tag: "1004", accessCode: "5815287646", pfpUrl: "https://placehold.co/80x80/FBBF24/000000?text=G" },
-            { username: "Isaac", tag: "1005", accessCode: "0269927548", pfpUrl: "https://placehold.co/80x80/EC4899/ffffff?text=I" },
-        ];
+        // Since we are not using access codes anymore, we define a collection path for simple users
+        const ANONYMOUS_USERS_COLLECTION_PATH = `/artifacts/${appId}/public/data/anonymous_users`; 
         
         // --- Utility Functions ---
 
@@ -104,16 +61,10 @@ service cloud.firestore {
             };
         }
 
-        // --- Auth and Init ---
+        // --- Auth and Init (Simplified) ---
 
         async function initFirebase() {
             try {
-                if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('YourDefaultApiKeyGoesHere')) {
-                    document.getElementById('loading-status').textContent = "Initialization: Using Default/Placeholder Firebase config.";
-                } else {
-                     document.getElementById('loading-status').textContent = "Initialization: Using environment-provided Firebase config.";
-                }
-                
                 setLogLevel('error'); 
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -121,276 +72,76 @@ service cloud.firestore {
 
                 await setPersistence(auth, browserSessionPersistence);
                 
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
+                // Immediately sign in anonymously for instant access
+                if (!auth.currentUser) {
                     await signInAnonymously(auth);
                 }
-
-                // Seed default users now that DB is initialized
-                await seedDefaultUsersIfNecessary();
 
                 // Wait for auth state to be resolved
                 onAuthStateChanged(auth, (user) => {
                     isAuthReady = true;
                     if (user) {
                         currentUserId = user.uid;
-                        isAdmin = currentUserId === ADMIN_ID;
-                        document.getElementById('loading-status').textContent = "Authenticated successfully. Loading profile...";
-                        handleSuccessfulAuth(true); // Call with true to indicate full auth
+                        // For the simplified version, the anonymous UID is the user ID.
+                        handleSuccessfulAuth(); 
                     } else {
                         currentUserId = null;
-                        isAdmin = false;
-                        document.getElementById('loading-status').textContent = "Waiting for login...";
-                        handleSuccessfulAuth(false); // Call with false to indicate no full auth
+                        document.getElementById('loading-status').textContent = "Authentication Failed. Cannot access Firestore.";
                     }
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
                 document.getElementById('loading-status').textContent = `Initialization Error: ${error.message}`;
-                showModal('errorModal', `Firebase initialization failed. Check console for details. Error: ${error.message}`);
+                showMessageBox("Error", `Firebase init failed: ${error.message}`, 5000, 'bg-red-500');
             }
         }
 
-        async function seedDefaultUsersIfNecessary() {
-            try {
-                // We check if the codes collection has at least one document.
-                const codesRef = collection(db, CODES_COLLECTION_PATH);
-                const codesSnapshot = await getDocs(query(codesRef));
+        async function createOrFetchAnonymousUserProfile() {
+            if (!currentUserId || !db) return;
 
-                if (codesSnapshot.empty) {
-                    console.log("Seeding default users...");
-                    for (const profile of SEEDED_PROFILES) {
-                        // 1. Check if the code exists
-                        const codeQuery = query(codesRef, where('accessCode', '==', profile.accessCode));
-                        const existingCodeDocs = await getDocs(codeQuery);
-                        
-                        if (existingCodeDocs.empty) {
-                             // 2. Create a placeholder user document (without actual authentication)
-                             // We use a generated UUID as the UID for the placeholder
-                            const placeholderUid = crypto.randomUUID(); 
-
-                            // 3. Create the profile in the users collection
-                            await setDoc(doc(db, USERS_COLLECTION_PATH, placeholderUid), {
-                                userId: placeholderUid,
-                                username: profile.username,
-                                tag: profile.tag,
-                                pfpUrl: profile.pfpUrl,
-                                isAdmin: profile.accessCode === ADMIN_ID,
-                                lastOnline: serverTimestamp()
-                            });
-
-                            // 4. Create the access code entry
-                            await setDoc(doc(db, CODES_COLLECTION_PATH, profile.accessCode), {
-                                accessCode: profile.accessCode,
-                                userId: placeholderUid,
-                                username: profile.username, // For display in code list
-                                isSeeded: true
-                            });
-                        }
-                    }
-                    console.log("Default users seeded successfully.");
-                } else {
-                    // Update seeded profiles just in case the codes changed (like in this request)
-                    for (const profile of SEEDED_PROFILES) {
-                         const codesRef = collection(db, CODES_COLLECTION_PATH);
-                         const codeDocRef = doc(codesRef, profile.accessCode);
-                         
-                         // Try to get the existing code document
-                         const codeDoc = await getDoc(codeDocRef);
-                         
-                         if (codeDoc.exists()) {
-                            const existingData = codeDoc.data();
-                            // If the code already points to a user, update the user's profile
-                            if (existingData.userId) {
-                                const userDocRef = doc(db, USERS_COLLECTION_PATH, existingData.userId);
-                                await updateDoc(userDocRef, {
-                                    username: profile.username,
-                                    tag: profile.tag,
-                                    isAdmin: profile.accessCode === ADMIN_ID,
-                                });
-                            }
-                         } else {
-                            // If the code doesn't exist, create it (handles new or missing seed codes)
-                            const placeholderUid = crypto.randomUUID(); 
-                            const userDocRef = doc(db, USERS_COLLECTION_PATH, placeholderUid);
-                            
-                            await setDoc(userDocRef, {
-                                userId: placeholderUid,
-                                username: profile.username,
-                                tag: profile.tag,
-                                pfpUrl: profile.pfpUrl,
-                                isAdmin: profile.accessCode === ADMIN_ID,
-                                lastOnline: serverTimestamp()
-                            });
-
-                            await setDoc(codeDocRef, {
-                                accessCode: profile.accessCode,
-                                userId: placeholderUid,
-                                username: profile.username,
-                                isSeeded: true
-                            });
-                         }
-                    }
-                }
-            } catch (error) {
-                console.error("Error seeding default users:", error);
+            const userDocRef = doc(db, ANONYMOUS_USERS_COLLECTION_PATH, currentUserId);
+            const docSnap = await getDoc(userDocRef);
+            
+            if (docSnap.exists()) {
+                currentUserData = docSnap.data();
+                isAdmin = currentUserData.isAdmin || false;
+            } else {
+                // If it's a new anonymous user, create a default profile
+                const randomName = `User${Math.floor(1000 + Math.random() * 9000)}`;
+                const newProfile = {
+                    userId: currentUserId,
+                    username: randomName,
+                    tag: Math.floor(1000 + Math.random() * 9000).toString(),
+                    pfpUrl: `https://placehold.co/80x80/${Math.floor(Math.random()*16777215).toString(16)}/ffffff?text=${randomName.charAt(0)}`,
+                    isAdmin: currentUserId === ADMIN_ID,
+                    lastOnline: serverTimestamp(),
+                    isAnonymous: true
+                };
+                await setDoc(userDocRef, newProfile);
+                currentUserData = newProfile;
+                isAdmin = newProfile.isAdmin;
             }
-        }
-        
-        // Custom Auth with Access Code
-        async function authenticateWithCode(accessCode) {
-            const code = accessCode.trim();
-            if (code.length !== 10) {
-                 showMessageBox("Error", "Access code must be exactly 10 digits long.", 3000, 'bg-red-500');
-                 return;
-            }
-
-            try {
-                // 1. Check the CODES collection for the access code
-                const codeDocRef = doc(db, CODES_COLLECTION_PATH, code);
-                const codeDoc = await getDoc(codeDocRef);
-
-                if (!codeDoc.exists()) {
-                    showMessageBox("Error", "Invalid Access Code. Please try again.", 3000, 'bg-red-500');
-                    return;
-                }
-
-                const userData = codeDoc.data();
-                const targetUserId = userData.userId;
-
-                // 2. Fetch the target user's profile
-                const userDocRef = doc(db, USERS_COLLECTION_PATH, targetUserId);
-                const userDoc = await getDoc(userDocRef);
-                
-                if (!userDoc.exists()) {
-                     showMessageBox("Error", "User profile missing. Please contact support.", 3000, 'bg-red-500');
-                     return;
-                }
-
-                // 3. Sign in anonymously (if not already signed in with a permanent ID)
-                const { user } = await signInAnonymously(auth);
-                
-                // 4. Update the current anonymous user's profile with the target user's data
-                const userProfile = userDoc.data();
-
-                await setDoc(doc(db, USERS_COLLECTION_PATH, user.uid), {
-                    // Copy data from the target user to the current authenticated user's ID
-                    ...userProfile,
-                    userId: user.uid, // Use the new authenticated UID
-                    // The username and tag from the original profile remain
-                    lastOnline: serverTimestamp()
-                });
-
-                // 5. Update the code to point to the new authenticated user's UID
-                await updateDoc(codeDocRef, {
-                    userId: user.uid,
-                    // Keep isSeeded true for easy identification
-                });
-
-                // 6. Log in successful (onAuthStateChanged will handle the rest)
-                closeModal('loginModal');
-                showMessageBox("Success", `Welcome back, ${userProfile.username}!`, 3000, 'bg-green-600');
-                // The onAuthStateChanged listener will fire and call handleSuccessfulAuth(true)
-                
-            } catch (error) {
-                console.error("Login failed:", error);
-                showMessageBox("Error", `Login Failed: ${error.message}`, 5000, 'bg-red-500');
-            }
+            // Update last online timestamp every time we load
+            await updateDoc(userDocRef, { lastOnline: serverTimestamp() });
         }
 
-        async function createNewUser(username) {
-            const name = username.trim();
-            if (!name) return;
-
-            try {
-                // 1. Sign in anonymously to get a UID
-                const { user } = await signInAnonymously(auth);
-                const newUserId = user.uid;
-                
-                // 2. Generate a unique 10-digit code
-                let newCode;
-                let codeExists = true;
-                while (codeExists) {
-                    newCode = Math.floor(1000000000 + Math.random() * 9000000000).toString();
-                    const codeDocRef = doc(db, CODES_COLLECTION_PATH, newCode);
-                    const docSnap = await getDoc(codeDocRef);
-                    codeExists = docSnap.exists();
-                }
-
-                // 3. Create the user profile
-                await setDoc(doc(db, USERS_COLLECTION_PATH, newUserId), {
-                    userId: newUserId,
-                    username: name,
-                    tag: newCode.substring(0, 4), // Use first 4 digits as initial tag
-                    pfpUrl: `https://placehold.co/80x80/${Math.floor(Math.random()*16777215).toString(16)}/ffffff?text=${name.charAt(0)}`,
-                    isAdmin: false,
-                    lastOnline: serverTimestamp()
-                });
-
-                // 4. Create the access code entry
-                await setDoc(doc(db, CODES_COLLECTION_PATH, newCode), {
-                    accessCode: newCode,
-                    userId: newUserId,
-                    username: name,
-                    isSeeded: false // Not a seeded profile
-                });
-                
-                closeModal('newUserModal');
-                showMessageBox("Success", `Profile created! Your code is: ${newCode}. Keep it safe!`, 5000, 'bg-green-600');
-                // The onAuthStateChanged listener will fire and handle the final setup
-                
-            } catch (error) {
-                console.error("User creation failed:", error);
-                showMessageBox("Error", `Failed to create profile: ${error.message}`, 5000, 'bg-red-500');
-            }
-        }
-        
-        async function handleSuccessfulAuth(isAuthenticated) {
-            if (!isAuthenticated) {
-                currentUserId = null;
-                currentUserData = null;
-                document.getElementById('app-container').classList.add('hidden');
+        async function handleSuccessfulAuth() {
+            if (!currentUserId) {
                 document.getElementById('loading-overlay').classList.add('hidden');
-                showModal('loginModal');
+                document.getElementById('app-container').classList.add('hidden');
                 return;
             }
 
-            // Authentication succeeded, fetch user data and set up listeners
-            await fetchAndSetUserData();
+            // 1. Fetch or create the user's profile
+            await createOrFetchAnonymousUserProfile();
             
             if (currentUserData) {
                 document.getElementById('app-container').classList.remove('hidden');
                 document.getElementById('loading-overlay').classList.add('hidden');
                 setupListeners();
                 updateProfileDisplay();
-                // Close login modal if it's open
-                closeModal('loginModal');
             } else {
-                 // Fallback if profile doesn't exist (shouldn't happen with the current flow)
-                 // This usually means the sign-in was too quick, we wait.
                  document.getElementById('loading-status').textContent = "Profile data still loading...";
-            }
-        }
-
-        async function fetchAndSetUserData() {
-            if (!currentUserId || !db) return;
-
-            try {
-                const userDocRef = doc(db, USERS_COLLECTION_PATH, currentUserId);
-                const docSnap = await getDoc(userDocRef);
-
-                if (docSnap.exists()) {
-                    currentUserData = docSnap.data();
-                    isAdmin = currentUserData.isAdmin || false;
-                } else {
-                    // This scenario should only happen if a user is authenticated but their profile document was deleted
-                    console.error("Authenticated user has no profile data.");
-                    await signOut(auth); // Force log out
-                }
-            } catch (error) {
-                console.error("Error fetching user data:", error);
-                await signOut(auth);
             }
         }
         
@@ -400,6 +151,12 @@ service cloud.firestore {
             // Stop existing listeners first
             if (unsubscribeMessages) unsubscribeMessages();
             if (unsubscribeUsers) unsubscribeUsers();
+            
+            // Check for auth readiness before querying
+            if (!isAuthReady || !currentUserId) {
+                console.warn("Attempted to set up listeners before auth was ready.");
+                return;
+            }
 
             // 1. Messages Listener
             const messagesRef = collection(db, MESSAGES_COLLECTION_PATH);
@@ -415,11 +172,13 @@ service cloud.firestore {
                 messages.sort((a, b) => a.timestamp - b.timestamp);
                 renderMessages(messages);
             }, (error) => {
-                console.error("Error fetching messages:", error);
+                // If this is the source of the insufficient permissions error, it will log here.
+                console.error("Error fetching messages (Permissions Issue):", error);
+                showMessageBox("Permissions Error", "Could not fetch messages. Check environment rules.", 5000, 'bg-red-700');
             });
 
             // 2. Users Listener
-            const usersRef = collection(db, USERS_COLLECTION_PATH);
+            const usersRef = collection(db, ANONYMOUS_USERS_COLLECTION_PATH);
             
             unsubscribeUsers = onSnapshot(usersRef, (snapshot) => {
                 const users = [];
@@ -435,8 +194,7 @@ service cloud.firestore {
              const updateOnlineStatus = debounce(async (isOnline) => {
                 if (currentUserId && db && currentUserData) {
                     try {
-                         // We update the local user's own profile doc.
-                        await updateDoc(doc(db, USERS_COLLECTION_PATH, currentUserId), {
+                        await updateDoc(doc(db, ANONYMOUS_USERS_COLLECTION_PATH, currentUserId), {
                             lastOnline: isOnline ? serverTimestamp() : Date.now(),
                             isOnline: isOnline 
                         });
@@ -460,7 +218,10 @@ service cloud.firestore {
         async function sendMessage() {
             const input = document.getElementById('message-input');
             const content = input.value.trim();
-            if (!content || !currentUserId || !currentUserData) return;
+            if (!content || !currentUserId || !currentUserData) {
+                if (!currentUserData) showMessageBox("Error", "Profile still loading. Please wait.", 3000, 'bg-red-500');
+                return;
+            }
 
             const message = {
                 userId: currentUserId,
@@ -473,11 +234,12 @@ service cloud.firestore {
             };
 
             try {
+                // Note: This collection must be publicly writable by authenticated users
                 await addDoc(collection(db, MESSAGES_COLLECTION_PATH), message);
                 input.value = ''; // Clear input on success
             } catch (error) {
-                console.error("Error sending message:", error);
-                showMessageBox("Error", "Failed to send message.", 3000, 'bg-red-500');
+                console.error("Error sending message (Permissions Issue):", error);
+                showMessageBox("Permissions Error", "Failed to send message. Check console.", 5000, 'bg-red-700');
             }
         }
 
@@ -541,8 +303,9 @@ service cloud.firestore {
             
             // Separate online and offline users
             const now = Date.now();
-            const onlineUsers = users.filter(u => u.isOnline === true || (now - u.lastOnline < 30000 && typeof u.lastOnline === 'number'));
-            const offlineUsers = users.filter(u => u.isOnline === false || (now - u.lastOnline >= 30000 || typeof u.lastOnline !== 'number'));
+            // A user is considered online if they updated their timestamp in the last 30 seconds
+            const onlineUsers = users.filter(u => u.isOnline === true || (u.lastOnline && (now - (u.lastOnline.toMillis ? u.lastOnline.toMillis() : u.lastOnline)) < 30000));
+            const offlineUsers = users.filter(u => !u.isOnline && (u.lastOnline && (now - (u.lastOnline.toMillis ? u.lastOnline.toMillis() : u.lastOnline)) >= 30000));
 
             // Sort by username
             onlineUsers.sort((a, b) => a.username.localeCompare(b.username));
@@ -604,29 +367,6 @@ service cloud.firestore {
             document.getElementById('setting-pfpurl').value = currentUserData.pfpUrl || '';
             document.getElementById('setting-userid').textContent = currentUserId || 'N/A';
             document.getElementById('setting-admin-status').textContent = isAdmin ? 'Yes' : 'No';
-            document.getElementById('setting-access-code').textContent = 'Loading...';
-            
-            fetchAccessCode();
-        }
-        
-        async function fetchAccessCode() {
-             if (!currentUserId || !db) return;
-             
-             try {
-                const codesRef = collection(db, CODES_COLLECTION_PATH);
-                const codeQuery = query(codesRef, where('userId', '==', currentUserId));
-                const snapshot = await getDocs(codeQuery);
-                
-                if (!snapshot.empty) {
-                    const code = snapshot.docs[0].data().accessCode;
-                    document.getElementById('setting-access-code').textContent = code;
-                } else {
-                    document.getElementById('setting-access-code').textContent = 'No Permanent Code';
-                }
-             } catch (error) {
-                 console.error("Error fetching access code:", error);
-                 document.getElementById('setting-access-code').textContent = 'Error';
-             }
         }
         
         async function updateProfile() {
@@ -642,27 +382,16 @@ service cloud.firestore {
             }
             
             try {
-                // Update User Profile
-                await updateDoc(doc(db, USERS_COLLECTION_PATH, currentUserId), {
+                // Update User Profile in the ANONYMOUS_USERS collection
+                await updateDoc(doc(db, ANONYMOUS_USERS_COLLECTION_PATH, currentUserId), {
                     username: newUsername,
                     tag: newTag,
                     pfpUrl: newPfpUrl
                 });
 
                 // Re-fetch and update local state
-                await fetchAndSetUserData();
+                await createOrFetchAnonymousUserProfile();
                 updateProfileDisplay();
-                
-                // Update associated code entry for clarity (optional but helpful)
-                const codesRef = collection(db, CODES_COLLECTION_PATH);
-                const codeQuery = query(codesRef, where('userId', '==', currentUserId));
-                const snapshot = await getDocs(codeQuery);
-                
-                if (!snapshot.empty) {
-                    await updateDoc(snapshot.docs[0].ref, {
-                        username: newUsername,
-                    });
-                }
                 
                 closeModal('settingsModal');
                 showMessageBox("Success", "Profile updated successfully!", 3000, 'bg-green-600');
@@ -728,8 +457,6 @@ service cloud.firestore {
         window.showModal = showModal;
         window.closeModal = closeModal;
         window.updateProfile = updateProfile;
-        window.authenticateWithCode = authenticateWithCode;
-        window.createNewUser = createNewUser;
         
         // Initialize the app
         document.addEventListener('DOMContentLoaded', initFirebase);
@@ -755,7 +482,6 @@ service cloud.firestore {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
             </button>
-            <!-- Add more servers/channels here -->
         </div>
 
         <!-- Channel List (Text Channels) -->
@@ -766,7 +492,6 @@ service cloud.firestore {
                     <button class="w-full text-left p-2 rounded-lg bg-gray-600 text-gray-200 font-semibold flex items-center transition-colors hover:bg-gray-500">
                         <span class="mr-2 text-lg">#</span> Global-Lounge
                     </button>
-                    <!-- More channels here -->
                 </div>
             </div>
             
@@ -817,52 +542,10 @@ service cloud.firestore {
     <div id="loading-overlay" class="fixed inset-0 bg-gray-900 bg-opacity-95 flex items-center justify-center z-50">
         <div class="flex flex-col items-center space-y-4">
             <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
-            <p id="loading-status" class="text-lg text-gray-400">Initializing Firebase and authenticating...</p>
+            <p id="loading-status" class="text-lg text-gray-400">Initializing Firebase for instant access...</p>
         </div>
     </div>
     
-    <!-- Modals -->
-    
-    <!-- Base Modal Structure -->
-    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center hidden">
-        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md">
-            <h2 class="text-3xl font-bold mb-4 text-white">Welcome Back!</h2>
-            <p class="text-gray-400 mb-6">Enter your 10-digit **Access Code** to log in, or create a new profile.</p>
-
-            <div class="space-y-4">
-                <input id="login-access-code" type="text" placeholder="10-Digit Access Code" maxlength="10" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
-                <button onclick="authenticateWithCode(document.getElementById('login-access-code').value)" class="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors shadow-md">
-                    Log In
-                </button>
-            </div>
-            
-            <div class="mt-6 pt-4 border-t border-gray-700">
-                <p class="text-gray-400 mb-3">Don't have a code? Create a new user profile:</p>
-                <button onclick="closeModal('loginModal'); showModal('newUserModal')" class="w-full py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors">
-                    Create New Profile
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <div id="newUserModal" class="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center hidden">
-        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md">
-            <h2 class="text-3xl font-bold mb-4 text-white">Create New Profile</h2>
-            <p class="text-gray-400 mb-6">Enter your desired username to get a new, unique access code.</p>
-
-            <div class="space-y-4">
-                <input id="new-user-username" type="text" placeholder="Choose a Username (e.g., JaneDoe)" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-white">
-                <button onclick="createNewUser(document.getElementById('new-user-username').value)" class="w-full py-3 rounded-lg bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors shadow-md">
-                    Create Profile
-                </button>
-            </div>
-            
-            <button onclick="closeModal('newUserModal'); showModal('loginModal')" class="mt-4 text-sm text-gray-400 hover:text-gray-200 transition-colors">
-                Back to Login
-            </button>
-        </div>
-    </div>
-
     <!-- Settings Modal -->
     <div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center hidden">
         <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-lg">
@@ -888,7 +571,7 @@ service cloud.firestore {
                 <div class="pt-4 border-t border-gray-700">
                     <h3 class="text-lg font-semibold text-gray-300 mb-3">Account Details</h3>
                     <div class="space-y-2 text-sm">
-                        <p class="text-gray-400">Your Access Code (Keep this private): <span id="setting-access-code" class="font-mono text-lg text-green-400 ml-2"></span></p>
+                        <p class="text-gray-400">Account Type: <span class="font-semibold text-sm text-yellow-400 ml-2">Anonymous Guest</span></p>
                         <p class="text-gray-500">User ID: <span id="setting-userid" class="font-mono text-xs"></span></p>
                         <p class="text-gray-500">Admin Status: <span id="setting-admin-status" class="font-semibold text-sm"></span></p>
                     </div>
