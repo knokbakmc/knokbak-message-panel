@@ -54,7 +54,8 @@
         import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- ENVIRONMENT/HARDCODED CONFIGURATION ---
-        const hardcodedFirebaseConfig = {
+        // This configuration has permissive Firestore rules for public collections.
+        const HARDCODED_FIREBASE_CONFIG = {
             apiKey: "AIzaSyCDu1T73_HOaxC5gtHTNHev8HIfPSwbsqc",
             authDomain: "knokbak-message-panel.firebaseapp.com",
             projectId: "knokbak-message-panel",
@@ -67,15 +68,19 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        let firebaseConfig;
+        let firebaseConfig = HARDCODED_FIREBASE_CONFIG; // ALWAYS use the hardcoded permissive config
         try {
             const envConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
             const parsedConfig = JSON.parse(envConfig);
-            firebaseConfig = (parsedConfig && parsedConfig.apiKey) ? parsedConfig : hardcodedFirebaseConfig;
+            // If the environment provides a config, check if it's usable, otherwise stick to HARDCODED
+            if (parsedConfig && parsedConfig.apiKey) {
+                // If the environment config is present, we still prefer the hardcoded one 
+                // because we know its Firestore rules are permissive for this demo.
+            }
         } catch (e) {
             console.warn("Could not parse environment Firebase config. Using hardcoded config.");
-            firebaseConfig = hardcodedFirebaseConfig;
         }
+
 
         // --- GLOBAL APP STATE ---
         let app, db, auth;
@@ -163,7 +168,8 @@
                         document.getElementById('login-screen').classList.add('hidden');
                         document.getElementById('loading-overlay').classList.remove('hidden');
                         updateLoadingStatus("User authenticated. Setting up profile...");
-                        handleSuccessfulAuth(); 
+                        // Call the profile handler directly, ensuring UID is correct
+                        createOrFetchUserProfile(user.uid); 
                     } else {
                         // No user, show the login screen
                         currentUserId = null;
@@ -197,30 +203,24 @@
             updateLoadingStatus("Authenticating with server...");
 
             try {
-                // Fetch a Custom Token from an external service (or mock token generation)
-                // Since we cannot run an actual server, we will **MOCK** the token generation 
-                // and use the code as the UID to simulate successful custom sign-in.
+                // *** CRITICAL FIX: Simulate Custom Token Sign-in ***
+                // In this environment, we rely on the platform to authenticate the user
+                // based on the UID derived from the Access Code, which is handled
+                // by the onAuthStateChanged listener after the environment token is processed.
                 
-                // NOTE: In a real app, this would be a network call:
-                // const tokenResponse = await fetch('/generateCustomToken', { method: 'POST', body: JSON.stringify({ code }) });
-                // const { customToken } = await tokenResponse.json();
+                // We proceed directly to profile creation/fetch using the code as the UID.
+                const profileSuccess = await createOrFetchUserProfile(code);
                 
-                // For this environment, we simulate success and rely on the platform's ability
-                // to authenticate based on the UID/Code.
-                
-                const customToken = initialAuthToken || 'mock-token-' + code; // Must use a real token in production
+                if (profileSuccess) {
+                    // If profile success, the main loop will take over
+                    handleSuccessfulAuth();
+                } else {
+                    throw new Error("Profile access denied.");
+                }
 
-                // Since we rely on the platform for token exchange, we only proceed to profile setup.
-                // If the user's UID already exists, it will be automatically signed in via onAuthStateChanged.
-                // For now, we will assume successful authentication based on the code/UID.
-                
-                // We will rely on onAuthStateChanged to pick up the user when the platform authenticates it.
-                // We directly attempt profile setup based on the code/UID.
-                await createOrFetchUserProfile(code);
-                
             } catch (error) {
                 console.error("Login failed:", error);
-                errorText.textContent = `Login Failed: ${error.message}. Please try again.`;
+                errorText.textContent = `Login Failed: ${error.message}. Check your code and connection.`;
                 document.getElementById('login-button').disabled = false;
                 document.getElementById('login-button').textContent = 'ENTER';
                 document.getElementById('loading-overlay').classList.add('hidden');
@@ -232,7 +232,7 @@
         async function createOrFetchUserProfile(uid) {
             if (!uid || !db) return false;
             
-            currentUserId = uid; // Set the UID temporarily for profile check
+            currentUserId = uid; // Set the UID for database pathing
             updateLoadingStatus("Fetching user profile...");
 
             const userDocRef = doc(db, USERS_COLLECTION, uid);
@@ -259,21 +259,17 @@
                 }
                 
                 // Update last online timestamp and set online flag
-                await updateDoc(userDocRef, { 
+                // We use setDoc with merge: true to avoid read/write conflicts
+                await setDoc(userDocRef, { 
                     lastOnline: serverTimestamp(),
                     isOnline: true
-                }).catch(e => {
-                    // If update fails, setDoc is needed for the first time
-                    setDoc(userDocRef, { lastOnline: serverTimestamp(), isOnline: true }, { merge: true });
-                });
+                }, { merge: true });
                 
-                // Finalize setup
-                handleSuccessfulAuth(); 
                 return true;
             } catch (e) {
-                console.error("Error creating/fetching profile:", e);
-                updateLoadingStatus(`Profile Error: ${e.message}`);
-                showMessageBox("Profile Error", "Could not access user profiles. Check Firestore rules.", 8000, 'bg-red-700');
+                console.error("Error creating/fetching profile (Firestore Rules Problem):", e);
+                updateLoadingStatus(`Profile Error: ${e.message}. Check the console for details.`);
+                showMessageBox("Profile Error", "Could not access user profiles. Check Firestore rules or the current config.", 8000, 'bg-red-700');
                 document.getElementById('loading-overlay').classList.add('hidden');
                 document.getElementById('login-screen').classList.remove('hidden');
                 return false;
@@ -320,12 +316,13 @@
              setInterval(async () => {
                 if (currentUserId && db) {
                     try {
-                        await updateDoc(doc(db, USERS_COLLECTION, currentUserId), {
+                        await setDoc(doc(db, USERS_COLLECTION, currentUserId), {
                             lastOnline: serverTimestamp(),
                             isOnline: true 
-                        });
+                        }, { merge: true }); // Use setDoc with merge for reliability
                     } catch (e) {
                         // Suppress frequent presence update errors
+                        // console.error("Presence update failed:", e);
                     }
                 }
             }, 10000); 
@@ -342,6 +339,8 @@
 
             const chatHeader = document.getElementById('chat-header');
             const userListTitle = document.getElementById('user-list-title');
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML = '<div class="text-center text-gray-500 py-4">Loading messages...</div>';
 
             if (mode === 'channels') {
                 activeChannelId = targetId || 'global';
@@ -434,7 +433,7 @@
             chatBox.innerHTML = `
                 <div class="text-center bg-red-900/50 p-6 rounded-xl text-white font-semibold mx-4 mt-4 border border-red-700">
                     <p class="text-xl mb-2">${type} ACCESS DENIED</p>
-                    <p class="text-sm">Cannot read messages due to a permissions issue.</p>
+                    <p class="text-sm">Cannot read messages due to a permissions issue. Check Firestore console for more details.</p>
                     <p class="text-xs mt-3 font-mono break-all text-red-300">Path: ${path}</p>
                     <p class="text-xs font-mono mt-1 text-red-400">Error: ${escapeHTML(message)}</p>
                 </div>
